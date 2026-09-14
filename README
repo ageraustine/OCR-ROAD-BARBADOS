@@ -1,4 +1,4 @@
-# R.O.A.D. Historical HTR (Handwritten Text Recognition) Pipeline
+# R.O.A.D. Historical HTR Pipeline
 
 A fine-tuning and evaluation pipeline for historical document Handwritten Text Recognition (HTR) using Vision-Language Models (Qwen3-VL-4B/8B Instruct). Optimized for challenging, degraded archival records featuring complex handwriting, caret insertion abbreviations, historical tildes, and money-in-words representations.
 
@@ -21,9 +21,7 @@ A fine-tuning and evaluation pipeline for historical document Handwritten Text R
 
 ## 📁 Repository Structure
 
-
 ```
-
 ROAD/
 ├── dataset/
 │   ├── images/              # Flattened image directory (.jpg, .jpeg, .png)
@@ -36,7 +34,6 @@ ROAD/
 │       ├── train.py         # Main training execution script
 │       └── inference.py     # Evaluation & test submission generation script
 └── README.md
-
 ```
 
 ---
@@ -55,21 +52,19 @@ transformers < 5.0.0
 peft < 0.15.0
 opencv-python-headless
 soup-cli
-
 ```
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone [https://github.com/ageraustine/ROAD.git](https://github.com/ageraustine/ROAD.git)
+git clone https://github.com/ageraustine/ROAD.git
 cd ROAD
 
 # Install dependencies
 pip install "soup-cli[all]"
 pip install opencv-python-headless
-pip install git+[https://github.com/MakazhanAlpamys/Soup.git](https://github.com/MakazhanAlpamys/Soup.git)
-
+pip install git+https://github.com/MakazhanAlpamys/Soup.git
 ```
 
 ---
@@ -84,7 +79,6 @@ Ensure images are downloaded and extracted to `dataset/images/`. The extraction 
 # Example structure:
 # dataset/images/sample_001.jpg
 # dataset/Train.csv
-
 ```
 
 ### 2. Configuration (`config.yaml`)
@@ -111,7 +105,6 @@ training:
 inference:
   checkpoint: "outputs/qwen3-4b-full/best"
   output_csv: "submission.csv"
-
 ```
 
 ### 3. Running Training
@@ -121,7 +114,6 @@ Execute the training script from the model source directory:
 ```bash
 cd src/qwen2vl
 python3 -u train.py --config configs/config.yaml
-
 ```
 
 *Training metrics evaluate Character Error Rate (CER), Word Error Rate (WER), and a combined competition score ($0.5 \times \text{WER} + 0.5 \times \text{CER}$) with early stopping enabled.*
@@ -133,7 +125,6 @@ Generate test set predictions using the best saved checkpoint:
 ```bash
 cd src/qwen2vl
 python inference.py --checkpoint outputs/qwen3-4b-full/best
-
 ```
 
 Output predictions will be saved to `submission.csv` at the repository root.
