@@ -197,6 +197,7 @@ def assess_document_quality_batch(
     processor,
     max_pixels: int = 2016000,
     max_new_tokens: int = 256,
+    verbose: bool = False,
 ) -> list[Optional[Dict[str, float]]]:
     """
     Assess document quality using VLM (batched for efficiency).
@@ -207,6 +208,7 @@ def assess_document_quality_batch(
         processor: Processor
         max_pixels: Max image resolution
         max_new_tokens: Max tokens to generate
+        verbose: Print raw VLM responses for debugging
 
     Returns:
         List of score dicts (one per image), None for failed assessments
@@ -254,42 +256,63 @@ def assess_document_quality_batch(
             for m in messages_batch
         ]
 
-        # Process batch
-        inputs = processor(
-            text=texts,
-            images=images,
-            padding=True,
-            return_tensors="pt",
-        ).to(model.device)
+        # CRITICAL FIX: Set padding_side='left' for decoder-only batched generation
+        original_padding_side = processor.tokenizer.padding_side
+        processor.tokenizer.padding_side = 'left'
 
-        # Generate assessments
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                num_beams=1,
-                temperature=None,
-                top_p=None,
-                eos_token_id=processor.tokenizer.eos_token_id,
-                pad_token_id=processor.tokenizer.pad_token_id,
-            )
+        try:
+            # Process batch
+            inputs = processor(
+                text=texts,
+                images=images,
+                padding=True,
+                return_tensors="pt",
+            ).to(model.device)
 
-        # Decode responses
-        generated_ids = outputs[:, inputs["input_ids"].shape[1]:]
-        responses = processor.batch_decode(generated_ids, skip_special_tokens=True)
+            # Generate assessments
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    num_beams=1,
+                    temperature=None,
+                    top_p=None,
+                    eos_token_id=processor.tokenizer.eos_token_id,
+                    pad_token_id=processor.tokenizer.pad_token_id,
+                )
+
+            # Decode responses
+            generated_ids = outputs[:, inputs["input_ids"].shape[1]:]
+            responses = processor.batch_decode(generated_ids, skip_special_tokens=True)
+
+        finally:
+            # Restore original padding side
+            processor.tokenizer.padding_side = original_padding_side
 
         # Parse all responses
         results = [None] * len(image_paths)
         for batch_idx, original_idx in enumerate(valid_indices):
             response = responses[batch_idx].strip()
+
+            if verbose:
+                print(f"\n--- Response for {image_paths[original_idx].name} ---")
+                print(response)
+                print("---\n")
+
             scores = parse_quality_response(response)
+
+            if scores is None and verbose:
+                print(f"  ⚠️  Failed to parse JSON from response for {image_paths[original_idx].name}")
+
             results[original_idx] = scores
 
         return results
 
     except Exception as e:
         print(f"  ⚠️  Batch processing error: {e}")
+        import traceback
+        traceback.print_exc()
         # Fallback: return None for all
         return [None] * len(image_paths)
 
@@ -300,30 +323,68 @@ def parse_quality_response(response: str) -> Optional[Dict[str, float]]:
 
     Handles various JSON formats and extracts scores robustly.
     """
-    # Try to find JSON object in response
-    json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
+    # Try multiple strategies to find JSON
+
+    # Strategy 1: Find JSON object with proper nesting (handles multi-line)
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+    if not json_match:
+        # Strategy 2: Try to extract just the outer braces
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+
     if not json_match:
         return None
 
-    try:
-        data = json.loads(json_match.group(0))
+    json_str = json_match.group(0)
 
-        # Extract expected fields
+    # Clean up common formatting issues
+    # Remove markdown code blocks if present
+    json_str = re.sub(r'```json\s*', '', json_str)
+    json_str = re.sub(r'```\s*', '', json_str)
+
+    try:
+        data = json.loads(json_str)
+
+        # Extract expected fields (try various naming conventions)
         required_fields = ["physical_damage", "ink_degradation", "paper_condition", "text_readability"]
+        field_aliases = {
+            "physical_damage": ["physical_damage", "physical", "damage", "tears_holes"],
+            "ink_degradation": ["ink_degradation", "ink", "fading", "ink_quality"],
+            "paper_condition": ["paper_condition", "paper", "staining", "paper_quality"],
+            "text_readability": ["text_readability", "readability", "clarity", "legibility"],
+        }
+
         scores = {}
 
         for field in required_fields:
+            found = False
+            # Try exact match first
             if field in data:
-                # Ensure score is in [0, 100] range
-                score = float(data[field])
-                scores[field] = max(0.0, min(100.0, score))
-            else:
+                try:
+                    score = float(data[field])
+                    scores[field] = max(0.0, min(100.0, score))
+                    found = True
+                except (ValueError, TypeError):
+                    pass
+
+            # Try aliases if exact match failed
+            if not found:
+                for alias in field_aliases.get(field, []):
+                    if alias in data:
+                        try:
+                            score = float(data[alias])
+                            scores[field] = max(0.0, min(100.0, score))
+                            found = True
+                            break
+                        except (ValueError, TypeError):
+                            continue
+
+            if not found:
                 # Missing field - return None (assessment failed)
                 return None
 
         return scores
 
-    except (json.JSONDecodeError, ValueError, KeyError):
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
         return None
 
 
@@ -357,6 +418,7 @@ def process_dataset(
     weights: Dict[str, float] = None,
     save_interval: int = 50,
     batch_size: int = 4,
+    verbose: bool = False,
 ) -> pd.DataFrame:
     """
     Process entire dataset and generate quality scores.
@@ -372,6 +434,7 @@ def process_dataset(
         weights: Composite score weights (defaults to DEFAULT_WEIGHTS)
         save_interval: Save checkpoint every N images
         batch_size: Number of images to process per batch (default: 4)
+        verbose: Print VLM responses for debugging
 
     Returns:
         DataFrame with quality scores
@@ -446,7 +509,7 @@ def process_dataset(
 
         # Assess quality for batch
         batch_scores = assess_document_quality_batch(
-            batch_paths, model, processor, max_pixels=max_pixels
+            batch_paths, model, processor, max_pixels=max_pixels, verbose=verbose
         )
 
         # Process results
@@ -624,6 +687,11 @@ def main():
         default=4,
         help="Number of images to process per batch (default: 4, increase for faster processing)"
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print VLM responses for debugging failed assessments"
+    )
     args = parser.parse_args()
 
     # Load config
@@ -665,6 +733,7 @@ def main():
     # Process dataset
     print(f"\nProcessing {len(image_ids)} images...")
     print(f"Output: {output_csv}")
+    print(f"Batch size: {args.batch_size}")
     print(f"Resume: {not args.no_resume}\n")
 
     df = process_dataset(
@@ -678,6 +747,7 @@ def main():
         weights=DEFAULT_WEIGHTS,
         save_interval=args.save_interval,
         batch_size=args.batch_size,
+        verbose=args.verbose,
     )
 
     # Print statistics
