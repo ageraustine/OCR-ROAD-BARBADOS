@@ -1314,21 +1314,27 @@ def setup_model(cfg: dict):
     exclude_modules_supported = "exclude_modules" in inspect.signature(LoraConfig.__init__).parameters
     if freeze_vision_tower:
         if exclude_modules_supported:
-            lora_kwargs["exclude_modules"] = r".*\.visual\..*"
+            # CRITICAL: Only freeze vision ENCODER (blocks), NOT merger/deepstack
+            # Merger is the vision→text bridge and MUST be trained for HTR!
+            lora_kwargs["exclude_modules"] = r".*\.visual\.(?:blocks|patch_embed|pos_embed|rotary_pos_emb).*"
         else:
             print("  [compat] installed peft has no LoraConfig.exclude_modules - "
-                  "vision LoRA modules will still be created, then frozen manually "
-                  "(requires_grad=False) after wrapping")
+                  "vision encoder will be frozen manually (requires_grad=False) after wrapping "
+                  "(merger/deepstack will remain trainable)")
 
     lora_config = LoraConfig(**supported_kwargs(LoraConfig, lora_kwargs))
     model = get_peft_model(model, lora_config)
 
     # Fallback freeze (only does anything if exclude_modules wasn't supported
-    # above; otherwise no vision LoRA params exist and this loop is a no-op).
+    # above; otherwise no vision encoder LoRA params exist and this loop is a no-op).
+    # CRITICAL: Only freeze vision ENCODER, NOT merger/deepstack!
     if freeze_vision_tower:
         for name, param in model.named_parameters():
+            # Freeze vision encoder blocks, but NOT merger or deepstack
             if ".visual." in name and "lora_" in name:
-                param.requires_grad = False
+                if any(x in name for x in ["blocks.", "patch_embed", "pos_embed", "rotary_pos_emb"]):
+                    param.requires_grad = False
+                # else: merger/deepstack remain trainable
 
     # LoRA+ configuration (different LR for A and B matrices)
     loraplus_lr_ratio = train_cfg.get("loraplus_lr_ratio", None)
@@ -1346,37 +1352,47 @@ def setup_model(cfg: dict):
     n_total = sum(p.numel() for p in model.parameters())
     trainable_pct = 100 * n_trainable / n_total
 
-    # Trainable vision-specific param count - the actual ground truth for
-    # whether freeze_vision_tower took effect, independent of which mechanism
-    # (exclude_modules vs. the manual fallback) ended up being used.
-    n_trainable_vision = sum(
+    # Trainable vision ENCODER param count (excludes merger/deepstack)
+    # This verifies freeze_vision_tower froze the encoder but NOT the merger
+    n_trainable_vision_encoder = sum(
         p.numel() for n, p in model.named_parameters()
         if ".visual." in n and p.requires_grad
+        and any(x in n for x in ["blocks.", "patch_embed", "pos_embed", "rotary_pos_emb"])
+    )
+
+    # Trainable merger/deepstack param count (should be non-zero!)
+    n_trainable_merger = sum(
+        p.numel() for n, p in model.named_parameters()
+        if ".visual." in n and p.requires_grad
+        and any(x in n for x in ["merger", "deepstack"])
     )
 
     print(f"✓ ({n_trainable/1e6:.1f}M trainable / {n_total/1e6:.0f}M total = {trainable_pct:.2f}%)")
     print(f"  LoRA modules: {len(lora_modules)} total ({vision_modules} vision / {llm_modules} llm)")
     if freeze_vision_tower:
-        vision_desc = "0 vision LoRA modules created" if vision_modules == 0 \
-            else f"{vision_modules} vision LoRA modules created but frozen"
-        print(f"  Vision tower FROZEN (freeze_vision_tower=true): "
-              f"{n_trainable_vision/1e6:.3f}M trainable vision params ({vision_desc})")
+        print(f"  Vision ENCODER frozen (blocks/embeddings): {n_trainable_vision_encoder/1e6:.3f}M params")
+        print(f"  Vision MERGER trainable (critical for HTR): {n_trainable_merger/1e6:.1f}M params")
+    else:
+        n_trainable_vision_total = n_trainable_vision_encoder + n_trainable_merger
+        print(f"  Vision tower trainable: {n_trainable_vision_total/1e6:.1f}M params "
+              f"({n_trainable_vision_encoder/1e6:.1f}M encoder + {n_trainable_merger/1e6:.1f}M merger)")
 
     # Sanity checks
     if n_trainable == 0:
         raise RuntimeError("LoRA matched zero modules. Check lora_target_modules regex.")
 
     if freeze_vision_tower:
-        # Fails loudly rather than silently continuing with a freeze that
-        # didn't actually take - e.g. if a future model family doesn't use
-        # ".visual." in its module names, both exclude_modules and the manual
-        # fallback above would silently match nothing, and training would
-        # proceed with vision unexpectedly still trainable.
-        if n_trainable_vision != 0:
+        # Verify vision ENCODER is frozen
+        if n_trainable_vision_encoder != 0:
             raise RuntimeError(
-                f"freeze_vision_tower=true but {n_trainable_vision} vision parameters "
-                f"are still trainable - the freeze did not take effect. Check that "
-                f"this model family still uses '.visual.' in its vision module names."
+                f"freeze_vision_tower=true but {n_trainable_vision_encoder} vision ENCODER parameters "
+                f"are still trainable - the freeze did not take effect."
+            )
+        # Verify MERGER is trainable (critical for HTR!)
+        if n_trainable_merger == 0:
+            raise RuntimeError(
+                f"freeze_vision_tower=true but merger has 0 trainable parameters! "
+                f"The merger MUST be trained for HTR. Check lora_target_modules regex."
             )
     else:
         if vision_modules == 0:
