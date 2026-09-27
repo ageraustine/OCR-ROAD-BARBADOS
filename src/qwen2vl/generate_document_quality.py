@@ -125,7 +125,7 @@ def assess_document_quality(
     max_new_tokens: int = 256,
 ) -> Optional[Dict[str, float]]:
     """
-    Assess document quality using VLM.
+    Assess document quality using VLM (single image).
 
     Returns:
         Dict with keys: physical_damage, ink_degradation, paper_condition,
@@ -191,6 +191,109 @@ def assess_document_quality(
         return None
 
 
+def assess_document_quality_batch(
+    image_paths: list[Path],
+    model,
+    processor,
+    max_pixels: int = 2016000,
+    max_new_tokens: int = 256,
+) -> list[Optional[Dict[str, float]]]:
+    """
+    Assess document quality using VLM (batched for efficiency).
+
+    Args:
+        image_paths: List of image paths to process
+        model: VLM model
+        processor: Processor
+        max_pixels: Max image resolution
+        max_new_tokens: Max tokens to generate
+
+    Returns:
+        List of score dicts (one per image), None for failed assessments
+    """
+    try:
+        # Load and preprocess all images
+        images = []
+        valid_indices = []
+
+        for idx, img_path in enumerate(image_paths):
+            try:
+                img = Image.open(img_path).convert("RGB")
+
+                # Downscale if needed
+                w, h = img.size
+                if w * h > max_pixels:
+                    scale = (max_pixels / (w * h)) ** 0.5
+                    img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+                images.append(img)
+                valid_indices.append(idx)
+            except Exception as e:
+                print(f"  ⚠️  Error loading {img_path.name}: {e}")
+                continue
+
+        if not images:
+            return [None] * len(image_paths)
+
+        # Format prompts for batch
+        messages_batch = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": img},
+                        {"type": "text", "text": QUALITY_ASSESSMENT_PROMPT},
+                    ],
+                }
+            ]
+            for img in images
+        ]
+
+        texts = [
+            processor.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
+            for m in messages_batch
+        ]
+
+        # Process batch
+        inputs = processor(
+            text=texts,
+            images=images,
+            padding=True,
+            return_tensors="pt",
+        ).to(model.device)
+
+        # Generate assessments
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1,
+                temperature=None,
+                top_p=None,
+                eos_token_id=processor.tokenizer.eos_token_id,
+                pad_token_id=processor.tokenizer.pad_token_id,
+            )
+
+        # Decode responses
+        generated_ids = outputs[:, inputs["input_ids"].shape[1]:]
+        responses = processor.batch_decode(generated_ids, skip_special_tokens=True)
+
+        # Parse all responses
+        results = [None] * len(image_paths)
+        for batch_idx, original_idx in enumerate(valid_indices):
+            response = responses[batch_idx].strip()
+            scores = parse_quality_response(response)
+            results[original_idx] = scores
+
+        return results
+
+    except Exception as e:
+        print(f"  ⚠️  Batch processing error: {e}")
+        # Fallback: return None for all
+        return [None] * len(image_paths)
+
+
 def parse_quality_response(response: str) -> Optional[Dict[str, float]]:
     """
     Parse VLM response to extract quality scores.
@@ -253,6 +356,7 @@ def process_dataset(
     max_pixels: int = 2016000,
     weights: Dict[str, float] = None,
     save_interval: int = 50,
+    batch_size: int = 4,
 ) -> pd.DataFrame:
     """
     Process entire dataset and generate quality scores.
@@ -267,6 +371,7 @@ def process_dataset(
         max_pixels: Max image resolution
         weights: Composite score weights (defaults to DEFAULT_WEIGHTS)
         save_interval: Save checkpoint every N images
+        batch_size: Number of images to process per batch (default: 4)
 
     Returns:
         DataFrame with quality scores
@@ -299,66 +404,85 @@ def process_dataset(
         except Exception as e:
             print(f"Could not load existing results: {e} - starting fresh")
 
-    # Process images
+    # Process images in batches
     results = []
     failed_ids = []
 
-    for idx, img_id in enumerate(tqdm(image_ids, desc="Assessing quality")):
-        # Skip if already processed
+    # Prepare batches of unprocessed images
+    unprocessed = [(idx, img_id) for idx, img_id in enumerate(image_ids) if img_id not in existing_results]
+
+    # Add already processed results
+    for img_id in image_ids:
         if img_id in existing_results:
             results.append({"ID": img_id, **existing_results[img_id]})
+
+    # Process in batches
+    for batch_start in tqdm(range(0, len(unprocessed), batch_size), desc="Assessing quality (batched)"):
+        batch_items = unprocessed[batch_start:batch_start + batch_size]
+        batch_ids = [img_id for _, img_id in batch_items]
+        batch_indices = [idx for idx, _ in batch_items]
+
+        # Find image files for batch
+        batch_paths = []
+        valid_batch_items = []
+
+        for (idx, img_id) in batch_items:
+            img_path = None
+            for ext in [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
+                candidate = image_dir / f"{img_id}{ext}"
+                if candidate.exists():
+                    img_path = candidate
+                    break
+
+            if img_path is None:
+                print(f"  ⚠️  Image not found: {img_id}")
+                failed_ids.append(img_id)
+            else:
+                batch_paths.append(img_path)
+                valid_batch_items.append((idx, img_id))
+
+        if not batch_paths:
             continue
 
-        # Find image file
-        img_path = None
-        for ext in [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
-            candidate = image_dir / f"{img_id}{ext}"
-            if candidate.exists():
-                img_path = candidate
-                break
-
-        if img_path is None:
-            print(f"  ⚠️  Image not found: {img_id}")
-            failed_ids.append(img_id)
-            continue
-
-        # Assess quality
-        scores = assess_document_quality(
-            img_path, model, processor, max_pixels=max_pixels
+        # Assess quality for batch
+        batch_scores = assess_document_quality_batch(
+            batch_paths, model, processor, max_pixels=max_pixels
         )
 
-        # Track whether assessment succeeded BEFORE filling placeholders
-        assessment_succeeded = scores is not None
+        # Process results
+        for (idx, img_id), scores in zip(valid_batch_items, batch_scores):
+            # Track whether assessment succeeded BEFORE filling placeholders
+            assessment_succeeded = scores is not None
 
-        if scores is None:
-            print(f"  ⚠️  Assessment failed: {img_id}")
-            failed_ids.append(img_id)
-            # Add placeholder scores (neutral) - these will NOT be used in training
-            # because success=False filters them out in data_utils.py line 68
-            scores = {
-                "physical_damage": 50.0,
-                "ink_degradation": 50.0,
-                "paper_condition": 50.0,
-                "text_readability": 50.0,
+            if scores is None:
+                print(f"  ⚠️  Assessment failed: {img_id}")
+                failed_ids.append(img_id)
+                # Add placeholder scores (neutral) - these will NOT be used in training
+                # because success=False filters them out in data_utils.py line 68
+                scores = {
+                    "physical_damage": 50.0,
+                    "ink_degradation": 50.0,
+                    "paper_condition": 50.0,
+                    "text_readability": 50.0,
+                }
+
+            # Compute composite score
+            composite = compute_composite_score(scores, weights)
+
+            # Store result
+            result = {
+                "ID": img_id,
+                "physical_damage": scores["physical_damage"],
+                "ink_degradation": scores["ink_degradation"],
+                "paper_condition": scores["paper_condition"],
+                "text_readability": scores["text_readability"],
+                "composite_score": composite,
+                "success": assessment_succeeded,  # FIX: Use flag saved before placeholders
             }
-
-        # Compute composite score
-        composite = compute_composite_score(scores, weights)
-
-        # Store result
-        result = {
-            "ID": img_id,
-            "physical_damage": scores["physical_damage"],
-            "ink_degradation": scores["ink_degradation"],
-            "paper_condition": scores["paper_condition"],
-            "text_readability": scores["text_readability"],
-            "composite_score": composite,
-            "success": assessment_succeeded,  # FIX: Use flag saved before placeholders
-        }
-        results.append(result)
+            results.append(result)
 
         # Save checkpoint
-        if (idx + 1) % save_interval == 0:
+        if len(results) % save_interval < batch_size:
             df = pd.DataFrame(results)
             # Validate before saving
             if len(df) > 0 and "success" in df.columns:
@@ -494,6 +618,12 @@ def main():
         default=None,
         help="Process only first N images (for testing)"
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Number of images to process per batch (default: 4, increase for faster processing)"
+    )
     args = parser.parse_args()
 
     # Load config
@@ -547,6 +677,7 @@ def main():
         max_pixels=max_pixels,
         weights=DEFAULT_WEIGHTS,
         save_interval=args.save_interval,
+        batch_size=args.batch_size,
     )
 
     # Print statistics

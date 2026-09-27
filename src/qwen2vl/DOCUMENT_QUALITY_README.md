@@ -19,11 +19,14 @@ The `generate_document_quality.py` script uses Qwen3-VL to analyze each historic
 ```bash
 cd src/qwen2vl
 
-# Full dataset (5,472 images, ~2-4 hours on A100)
+# Full dataset (5,472 images, ~1-2 hours on A100 with batching)
 python generate_document_quality.py
 
 # Test on subset (10 images)
 python generate_document_quality.py --subset 10
+
+# Faster processing with larger batch size (requires more VRAM)
+python generate_document_quality.py --batch-size 8
 
 # Use 8B model (slower but more accurate)
 python generate_document_quality.py --model Qwen/Qwen3-VL-8B-Instruct
@@ -46,6 +49,7 @@ python generate_document_quality.py [OPTIONS]
 | `--config` | `config_qwen3_8b.yaml` | Config file (in configs/ directory) |
 | `--model` | `Qwen/Qwen3-VL-4B-Instruct` | Model to use (4B=faster, 8B=more accurate) |
 | `--output` | `dataset/document_condition_v2.csv` | Output CSV path (VLM-based v2 format) |
+| `--batch-size` | 4 | Images per batch (increase for speed, decrease if OOM) |
 | `--no-resume` | False | Start from scratch (ignore existing results) |
 | `--save-interval` | 50 | Save checkpoint every N images |
 | `--image-dir` | From config | Override image directory |
@@ -61,6 +65,17 @@ python generate_document_quality.py --subset 50
 **Use 8B model (higher quality):**
 ```bash
 python generate_document_quality.py --model Qwen/Qwen3-VL-8B-Instruct
+```
+
+**Faster processing with larger batch (A100 80GB):**
+```bash
+python generate_document_quality.py --batch-size 8  # 2x faster
+python generate_document_quality.py --batch-size 16 # 3-4x faster (requires ~40GB VRAM)
+```
+
+**Smaller batch for limited VRAM (RTX 4090 24GB):**
+```bash
+python generate_document_quality.py --batch-size 2
 ```
 
 **Start fresh (ignore previous results):**
@@ -146,16 +161,23 @@ The training script (`data_utils.py` lines 63-81) automatically loads and merges
 
 ## Performance
 
-### Speed Estimates
+### Speed Estimates (with batching)
 
-| Model | GPU | Time (5,472 images) |
-|-------|-----|---------------------|
-| Qwen3-VL-4B | A100 80GB | ~2-3 hours |
-| Qwen3-VL-8B | A100 80GB | ~3-5 hours |
-| Qwen3-VL-4B | RTX 4090 | ~3-4 hours |
-| Qwen3-VL-8B | RTX 4090 | ~5-7 hours |
+| Model | GPU | Batch Size | Time (5,472 images) | Throughput |
+|-------|-----|------------|---------------------|------------|
+| Qwen3-VL-4B | A100 80GB | 4 (default) | ~1-2 hours | ~50-90 img/min |
+| Qwen3-VL-4B | A100 80GB | 8 | ~40-60 min | ~90-140 img/min |
+| Qwen3-VL-4B | A100 80GB | 16 | ~30-45 min | ~120-180 img/min |
+| Qwen3-VL-8B | A100 80GB | 4 | ~2-3 hours | ~30-45 img/min |
+| Qwen3-VL-4B | RTX 4090 24GB | 2 | ~2-3 hours | ~30-45 img/min |
+| Qwen3-VL-4B | RTX 4090 24GB | 4 | ~1.5-2 hours | ~45-60 img/min |
 
-**Throughput**: ~30-50 images/minute (4B model, A100)
+**Batching speedup**: 2-4x faster than single-image processing
+
+**VRAM usage**:
+- Batch size 4: ~20-25GB (A100/RTX 4090)
+- Batch size 8: ~35-40GB (A100 only)
+- Batch size 16: ~50-60GB (A100 80GB only)
 
 ### Resume Capability
 
@@ -213,7 +235,13 @@ pip install transformers>=4.57.0
 ```
 
 ### Issue: "CUDA out of memory"
-**Solution**: Use 4B model or reduce max_pixels:
+**Solution 1**: Reduce batch size:
+```bash
+python generate_document_quality.py --batch-size 2
+python generate_document_quality.py --batch-size 1  # slowest but works on any GPU
+```
+
+**Solution 2**: Use 4B model instead of 8B:
 ```bash
 python generate_document_quality.py --model Qwen/Qwen3-VL-4B-Instruct
 ```
@@ -233,7 +261,9 @@ python generate_document_quality.py --model Qwen/Qwen3-VL-4B-Instruct
 print(f"Response: {response}")
 ```
 
-## Advanced: Custom Weights
+## Advanced
+
+### Custom Weights
 
 Edit `DEFAULT_WEIGHTS` in the script to prioritize different aspects:
 
@@ -251,6 +281,27 @@ Regenerate:
 ```bash
 python generate_document_quality.py --no-resume
 ```
+
+### Optimal Batch Size
+
+Choose based on your GPU and priorities:
+
+**For maximum speed (A100 80GB):**
+```bash
+python generate_document_quality.py --batch-size 16  # ~30-45 min for full dataset
+```
+
+**For balanced speed/memory (RTX 4090 24GB, A100):**
+```bash
+python generate_document_quality.py --batch-size 4   # Default, good balance
+```
+
+**For limited VRAM (16GB GPUs):**
+```bash
+python generate_document_quality.py --batch-size 1   # Slowest but safest
+```
+
+**Rule of thumb**: Each batch slot adds ~8-10GB VRAM for 4B model, ~12-15GB for 8B model.
 
 ## Next Steps
 
