@@ -47,12 +47,8 @@ training:
   max_grad_norm: 1.0
   gradient_checkpointing: true
 
-  # Base rank/alpha - applies to anything NOT matched by rank_pattern below,
-  # i.e. the LLM's q/k/v/o_proj (attention) and gate/up/down_proj (MLP).
-  # UPDATED 2026-08-31: 16->32 per the hypothetical per-component ranking
-  # (see rank_pattern comment) - LLM attention and MLP landed at the same
-  # value in that table, so one base rank covers both without needing
-  # separate rank_pattern entries for each LLM module.
+  # Base rank/alpha - applies to LLM's q/k/v/o_proj (attention) and gate/up/down_proj (MLP)
+  # Vision tower is now FROZEN (LoRA only on LLM)
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.1
@@ -60,63 +56,20 @@ training:
   use_dora: false
   loraplus_lr_ratio: null  # DISABLED - logging anomaly suggests possible bug (0 A params, 368 B params)
 
-  # Rank asymmetry - Vision r=64, LLM r=16 (~80M params, optimal capacity)
-  # Rank pattern keys are matched by PEFT via SUFFIX match against the full
-  # dotted module path (re.match(r".*\." + key + "$", module_name) - verified
-  # against peft's actual _create_and_replace source, see
-  # github.com/huggingface/peft/issues/2194). This matters here specifically:
-  # the previous bare 'linear_fc1'/'linear_fc2' keys matched ALL THREE
-  # locations identically - blocks.N.mlp.linear_fc1, merger.linear_fc1, AND
-  # deepstack_merger_list.N.linear_fc1 all end in ".linear_fc1", so they were
-  # silently sharing one rank, not independently controllable. Decoupled
-  # below into three distinct keys per fc1/fc2 (mlp / merger / deepstack) -
-  # verified each resolves to exactly one key with no ambiguity and no
-  # accidental match against any language_model module. Values are UNCHANGED
-  # from before (still 64/128 everywhere) - this is a pure structural
-  # refactor so a future experiment can vary each group's rank independently,
-  # without this change itself altering training behavior.
-  # HYPOTHETICAL RANKS (2026-08-31) - capacity assigned by how domain-specific
-  # each component's job is, not by which tower it sits in:
-  #   - Attention (spatial routing in vision, sequential routing in the LLM)
-  #     is the most likely to transfer cleanly from pretraining -> lightest.
-  #   - MLP (per-token feature/content encoding - stroke vs. stain, period
-  #     vocabulary, place names) needs real adaptation -> moderate.
-  #   - Merger + DeepStack (the vision->LLM translation bridge - the one
-  #     piece with no pretrained equivalent at all, regardless of how good
-  #     either tower is individually) -> protected at the highest rank.
-  # UNVERIFIED: this is a first-principles priority ordering (merger/deepstack
-  # > MLP > attention), not confirmed against real training runs the way the
-  # earlier vision=64-vs-8 comparison was. Treat the RELATIVE ordering as the
-  # actual claim; the specific numbers are a reasonable starting guess, not a
-  # measured result.
-  # ISOLATION RUN E: raw vision MLP-only high. Tests whether the vision
-  # block MLP (per-patch feature extraction - recalibrating what counts as
-  # a stroke vs. degradation) specifically drove Run A's advantage, in
-  # isolation from attention/merger/deepstack (held at Run C's losing value).
-  rank_pattern:
-    qkv: 16                                           # control: low
-    proj: 16                                          # control: low
-    'mlp\.linear_fc1': 64                            # ISOLATED: high
-    'mlp\.linear_fc2': 64                            # ISOLATED: high
-    'merger\.linear_fc1': 16                          # control: low
-    'merger\.linear_fc2': 16                          # control: low
-    'deepstack_merger_list\.\d+\.linear_fc1': 16      # control: low
-    'deepstack_merger_list\.\d+\.linear_fc2': 16      # control: low
-  alpha_pattern:
-    qkv: 32
-    proj: 32
-    'mlp\.linear_fc1': 128
-    'mlp\.linear_fc2': 128
-    'merger\.linear_fc1': 32
-    'merger\.linear_fc2': 32
-    'deepstack_merger_list\.\d+\.linear_fc1': 32
-    'deepstack_merger_list\.\d+\.linear_fc2': 32
+  # LLM-only LoRA (vision encoder frozen)
+  # No rank_pattern needed - using uniform r=16 for all LLM modules
+  # If you want different ranks for LLM attention vs MLP, uncomment:
+  # rank_pattern:
+  #   'self_attn\.[qkvo]_proj': 16      # LLM attention
+  #   'mlp\.(?:gate|up|down)_proj': 32  # LLM MLP (example: higher rank)
+  # alpha_pattern:
+  #   'self_attn\.[qkvo]_proj': 32
+  #   'mlp\.(?:gate|up|down)_proj': 64
 
-  # Target modules - Covers vision tower + DeepStack mergers + LLM
-  # Vision: blocks (qkv/proj/linear_fc1/2) + merger + deepstack_merger_list
+  # Target modules - LLM ONLY (vision tower frozen)
   # LLM: self_attn (q/k/v/o_proj) + mlp (gate/up/down_proj)
-  lora_target_modules: '^model\.(?:visual\.(?:blocks\.\d+\.(?:attn\.(?:qkv|proj)|mlp\.linear_fc[12])|merger\.linear_fc[12]|deepstack_merger_list\.\d+\.linear_fc[12])|language_model\.layers\.\d+\.(?:self_attn\.[qkvo]_proj|mlp\.(?:gate|up|down)_proj))'
-  freeze_vision_tower: false
+  lora_target_modules: '^model\.language_model\.layers\.\d+\.(?:self_attn\.[qkvo]_proj|mlp\.(?:gate|up|down)_proj)'
+  freeze_vision_tower: true  # Vision encoder frozen
   lora_modules_to_save: null  # Merger covered in target_modules regex
 
   max_pixels: 2016000
@@ -147,7 +100,7 @@ training:
     min_delta: 0.0001  # Very small threshold - catches tiny improvements, avoids noise
 
 augmentation:
-  enabled: true # Document-aware augmentation based on condition analysis
+  enabled: false # Document-aware augmentation based on condition analysis
 
   # DEGRADATION augmentations (disabled for poor-condition docs)
   p_blur: 0.15         # ENABLED - mild (0.5-1.5px radius), gated off for poor/very-poor via p_degradation_mult
@@ -188,7 +141,7 @@ augmentation:
   max_pixels_ratio: 1.0     # 100% of max_pixels (2,016,000)
 
 inference:
-  checkpoint: "/content/drive/MyDrive/prd/qwen3-4B-single-textdiff-3/best"
+  checkpoint: "/content/drive/MyDrive/prd/qwen3-8B-NEW"
   output_csv: "submission_full.csv"
   max_new_tokens: 128  # Targets max at 120 chars - prevents loops structurally
   num_beams: 5
