@@ -61,19 +61,21 @@ def load_and_prepare_dataframe(data_cfg: dict) -> pd.DataFrame:
             print(f"⚠️  Warning: cluster_csv '{cluster_csv}' not found, proceeding without clustering")
 
     # Load document condition scores for adaptive augmentation (if available)
-    condition_csv = REPO_ROOT / "dataset" / "document_condition.csv"
+    # Using v2 (VLM-based quality assessment with Qwen3-VL)
+    condition_csv = REPO_ROOT / "dataset" / "document_condition_v2.csv"
     if condition_csv.exists():
         condition_df = pd.read_csv(condition_csv)
         # Filter to successful analyses only
         condition_df = condition_df[condition_df["success"] == True]
-        # Merge condition scores
-        df = df.merge(condition_df[["ID", "condition_score"]], on="ID", how="left")
+        # Merge condition scores (v2 uses composite_score, renamed to condition_score for pipeline)
+        df = df.merge(condition_df[["ID", "composite_score"]], on="ID", how="left")
+        df = df.rename(columns={"composite_score": "condition_score"})
         # Fill missing with median (for any images that failed analysis)
         median_cond = df["condition_score"].median()
         n_missing = df["condition_score"].isna().sum()
         if n_missing > 0:
             df.loc[df["condition_score"].isna(), "condition_score"] = median_cond
-        print(f"Loaded document condition scores from {condition_csv.name}")
+        print(f"Loaded VLM-based document condition scores from {condition_csv.name}")
         print(f"  Mean: {df['condition_score'].mean():.1f}, Median: {median_cond:.1f}, Std: {df['condition_score'].std():.1f}")
         if n_missing > 0:
             print(f"  Filled {n_missing} missing values with median")

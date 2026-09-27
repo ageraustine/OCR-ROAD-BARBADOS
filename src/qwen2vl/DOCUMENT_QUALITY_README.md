@@ -1,6 +1,8 @@
 # Document Quality Assessment with Qwen3-VL
 
-Generate reliable `document_condition.csv` using VLM-based quality assessment for adaptive augmentation during training.
+Generate reliable `document_condition_v2.csv` using VLM-based quality assessment for adaptive augmentation during training.
+
+**Note**: This generates v2 (VLM-based) scores, which are more reliable than v1 (CV-based metrics). The training pipeline automatically uses v2 when available.
 
 ## Overview
 
@@ -43,7 +45,7 @@ python generate_document_quality.py [OPTIONS]
 |--------|---------|-------------|
 | `--config` | `config_qwen3_8b.yaml` | Config file (in configs/ directory) |
 | `--model` | `Qwen/Qwen3-VL-4B-Instruct` | Model to use (4B=faster, 8B=more accurate) |
-| `--output` | `dataset/document_condition.csv` | Output CSV path (relative to repo root) |
+| `--output` | `dataset/document_condition_v2.csv` | Output CSV path (VLM-based v2 format) |
 | `--no-resume` | False | Start from scratch (ignore existing results) |
 | `--save-interval` | 50 | Save checkpoint every N images |
 | `--image-dir` | From config | Override image directory |
@@ -105,7 +107,7 @@ Default weights (tunable in `DEFAULT_WEIGHTS`):
 
 ## Training Integration
 
-The generated `document_condition.csv` is automatically used by `train.py` for **adaptive augmentation**.
+The generated `document_condition_v2.csv` is automatically used by `train.py` for **adaptive augmentation**.
 
 ### How It Works
 
@@ -131,14 +133,16 @@ The generated `document_condition.csv` is automatically used by `train.py` for *
 
 ### Automatic Integration
 
-The training script (`data_utils.py` lines 63-81) automatically loads and merges quality scores:
+The training script (`data_utils.py` lines 63-81) automatically loads and merges VLM-based quality scores:
 
-1. **Looks for** `dataset/document_condition.csv` in repo root
+1. **Looks for** `dataset/document_condition_v2.csv` in repo root
 2. **Filters** to successful assessments only (`success == True`)
-3. **Merges** on `ID` column with `Train.csv`
+3. **Merges** `composite_score` on `ID` column with `Train.csv` (renamed to `condition_score` internally)
 4. **Fills** missing scores with median (for any failed assessments)
 
 **No config changes needed** - just generate the CSV and the training pipeline will detect and use it automatically.
+
+**Note**: The pipeline uses v2 (VLM-based) exclusively. If you have old v1 (CV-based) files, they will be ignored.
 
 ## Performance
 
@@ -250,11 +254,11 @@ python generate_document_quality.py --no-resume
 
 ## Next Steps
 
-1. **Generate quality scores**:
+1. **Generate VLM-based quality scores** (v2):
    ```bash
    python generate_document_quality.py
    ```
-   This creates `dataset/document_condition.csv` in your repo root.
+   This creates `dataset/document_condition_v2.csv` in your repo root with VLM-assessed quality metrics.
 
 2. **Review statistics** to verify reasonable distribution:
    - Check the stratification breakdown
@@ -265,16 +269,23 @@ python generate_document_quality.py --no-resume
    ```bash
    python train.py --config config_qwen3_8b.yaml
    ```
-   The training script will automatically detect and load `dataset/document_condition.csv`.
+   The training script will automatically detect and load `dataset/document_condition_v2.csv`.
    You'll see this message during training:
    ```
-   Loaded document condition scores from document_condition.csv
+   Loaded VLM-based document condition scores from document_condition_v2.csv
      Mean: 18.5, Median: 16.2, Std: 12.3
    ```
 
 4. **Compare performance** vs baseline (no quality scores):
-   - Rename the CSV temporarily to disable adaptive augmentation
-   - Train without quality scores: `mv dataset/document_condition.csv dataset/document_condition.csv.bak`
+   - Rename the CSV temporarily to disable adaptive augmentation:
+     ```bash
+     mv dataset/document_condition_v2.csv dataset/document_condition_v2.csv.bak
+     ```
+   - Train without quality scores (baseline run)
+   - Restore and train with adaptive augmentation:
+     ```bash
+     mv dataset/document_condition_v2.csv.bak dataset/document_condition_v2.csv
+     ```
    - Compare metrics between adaptive and baseline runs
    - Check if poor-condition documents improve with adaptive augmentation
    - Verify no degradation on excellent-condition documents
@@ -285,20 +296,21 @@ If training doesn't load the quality scores:
 
 1. **Check file location**:
    ```bash
-   ls dataset/document_condition.csv  # Should exist
+   ls dataset/document_condition_v2.csv  # Should exist
    ```
 
-2. **Verify CSV format**:
+2. **Verify CSV format** (VLM-based v2):
    ```bash
-   head -5 dataset/document_condition.csv
+   head -5 dataset/document_condition_v2.csv
    # Should have columns: ID,physical_damage,ink_degradation,paper_condition,text_readability,composite_score,success
+   # Verify composite_score column exists (v2 format)
    ```
 
 3. **Check training output** for this line:
    ```
-   Loaded document condition scores from document_condition.csv
+   Loaded VLM-based document condition scores from document_condition_v2.csv
    ```
-   If you see "Document condition scores not found" instead, the path is wrong.
+   If you see "Document condition scores not found (document_condition_v2.csv)" instead, the file is missing or in the wrong location.
 
 ## Citation
 

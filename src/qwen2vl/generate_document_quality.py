@@ -469,8 +469,8 @@ def main():
     )
     parser.add_argument(
         "--output",
-        default="dataset/document_condition.csv",
-        help="Output CSV path relative to repo root (default: dataset/document_condition.csv)"
+        default="dataset/document_condition_v2.csv",
+        help="Output CSV path relative to repo root (default: dataset/document_condition_v2.csv - VLM-based scores)"
     )
     parser.add_argument(
         "--no-resume",
