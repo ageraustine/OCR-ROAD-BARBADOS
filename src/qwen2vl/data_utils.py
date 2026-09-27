@@ -598,7 +598,7 @@ def compute_stratification_bins(df: pd.DataFrame, data_cfg: dict) -> pd.DataFram
     #      fallback: any scheme crossing these two flags guarantees a ~6-
     #      sample cell before condition or anything else is even applied.
     #
-    # Current scheme: condition (3) x text_type (3) x rare_vocab (2) = 18 bins.
+    # Current scheme: condition (3) x text_type (4) x length (3) = 36 bins.
     #   - text_type collapses has_digit/has_upper into one 3-level categorical
     #     (see compute_text_type) instead of crossing them, eliminating the
     #     near-empty cell.
@@ -613,16 +613,18 @@ def compute_stratification_bins(df: pd.DataFrame, data_cfg: dict) -> pd.DataFram
     #     Verified by direct bin-population testing, not assumed.
     #
     # Verified tier populations on the real training set (n=4098):
-    #   condition: good=~23%, medium=~57%, poor_or_worse=~19.5%
-    #   text_type: plain=928 (22.6%), names_only=2953 (72.1%), has_digits=217 (5.3%)
-    #   rare_vocab: ~48% have_rare / ~52% common
-    #   Resulting 18-bin scheme: smallest cell=10, no cell under 10 samples.
+    #   condition: good=~24%, medium=~45%, poor_or_worse=~32% (VLM-based v2 scores)
+    #   text_type: plain/names_only/has_caret/has_digits (4 categories)
+    #   length: short/medium/long (tertiles, ~33% each)
     #
-    # UPDATE (2026-08-30, same day, following request to consider the caret
-    # symbol '^'): folded a 'has_caret' tier into text_type, between
-    # has_digits and names_only - see compute_text_type and
-    # classify_caret_types docstrings. Scheme is now condition (3) x
-    # text_type (4) x rare_vocab (2) = 24 bins, smallest cell=14 (verified).
+    # UPDATE: Replaced rare_vocab with text_length. Rationale:
+    #   1. Competition metric is LENGTH-WEIGHTED (longer texts count more)
+    #   2. rare_vocab was weakly predictive (correlation=0.24)
+    #   3. Length is independent from quality/text_type
+    #   4. Val must match test length distribution for reliable CER estimates
+    #
+    # Scheme: condition (3) x text_type (4) x length (3) = 36 bins
+    # Expected smallest bin: ~114 samples (4098/36), well above minimum.
     # The caret marks two visually distinct scribal phenomena - interlineated
     # word insertions and superscript abbreviation/ordinal contractions - but
     # only their UNION is folded into the stratification key; interlineation
@@ -635,34 +637,26 @@ def compute_stratification_bins(df: pd.DataFrame, data_cfg: dict) -> pd.DataFram
     # 1. Visual condition bins (Good/Medium/Poor-or-worse)
     has_condition = "condition_score" in df.columns and not df["condition_score"].isna().all()
     if has_condition:
-        # Bin by visual degradation: good (<8.07), medium (8.07-23.38), poor_or_worse (>=23.38).
-        # These thresholds match the adaptive augmentation tiers' first two
-        # boundaries (the augmentation system itself further splits poor_or_worse
-        # into poor/very_poor at 26.12 for augmentation-strength purposes only;
-        # for stratification, poor+very_poor are combined into one tier since
-        # each individually is too small - ~10%/~9% - to stratify on alone).
+        # Bin by visual degradation: good (<20.5), medium (20.5-27.5), poor_or_worse (>=27.5).
+        # These thresholds are PERCENTILE-BASED (25th/75th) for VLM v2 scores.
+        # VLM-based scoring is systematically higher than old CV metrics
+        # (mean=24.5 vs old 13.6), so thresholds were recalibrated.
         #
-        # FIXED bins, not qcut(q=3): qcut produces equal-COUNT tertiles (33/33/33
-        # by construction), which on this data lands at (8.55, 13.94) - a "poor"
-        # tier that's a full third of the data, NOT the same ~19.5% poor-condition
-        # population the augmentation tiers and the rest of this design target.
-        # Caught by direct comparison against the fixed-threshold version: qcut
-        # gives 1824/1824/1824, fixed gives 1249/3156/1067 - materially different
-        # splits, and only the fixed one is what was actually validated via
-        # bin-population testing against the real 4098-row training set.
+        # The augmentation system further splits poor_or_worse into poor/very_poor
+        # at 27.5 for augmentation-strength purposes; for stratification, we use
+        # 3 bins to ensure each has sufficient samples (25%/50%/25% split).
         #
-        # These are the same precise percentiles (22.9th/80.5th) computed
-        # directly from the uploaded document_condition.csv (n=5472,
-        # success==True; mean=13.64, median=9.11, std=8.15 - text_contrast
-        # still included in the composite, confirmed via exact-fit linear
-        # regression against the five raw metrics).
+        # FIXED percentile bins, not qcut: This ensures consistent behavior
+        # across train/val splits and matches the augmentation tier boundaries.
+        # Verified against VLM v2 distribution (n=5472, success==True;
+        # mean=24.51, median=24.50, std=8.46).
         df["_condition_bin"] = pd.cut(
             df["condition_score"],
-            bins=[0, 8.07, 23.38, 100],
+            bins=[0, 20.5, 27.5, 100],
             labels=["good_cond", "medium_cond", "poor_cond"],
             include_lowest=True
         )
-        print(f"  ✓ Visual condition stratification enabled (3 fixed bins: <8.07 / 8.07-23.38 / >=23.38)")
+        print(f"  ✓ Visual condition stratification enabled (3 VLM-based bins: <20.5 / 20.5-27.5 / >=27.5)")
     else:
         df["_condition_bin"] = "unknown_cond"
         print(f"  ⚠️  No condition_score found - using text-only stratification")
@@ -674,20 +668,43 @@ def compute_stratification_bins(df: pd.DataFrame, data_cfg: dict) -> pd.DataFram
     df["_has_interlineation"], df["_has_superscript"] = classify_caret_types(df["Target"])
     df["_text_type"] = compute_text_type(df)
 
-    # 3. Rare vocabulary flag (corpus-relative hapax legomena by default) -
-    #    replaces difficulty_score in the stratification key.
-    rare_freq_threshold = data_cfg.get("rare_vocab_freq_threshold", 1)
-    df["_has_rare"] = compute_rare_vocabulary_flags(df["Target"], freq_threshold=rare_freq_threshold)
-    df["_rare_bin"] = df["_has_rare"].map({True: "rare_vocab", False: "common_vocab"})
+    # 3. Text length bins (critical: competition metric is length-weighted!)
+    #    Longer texts contribute more to final WER/CER score, so val must have
+    #    same length distribution as test to be representative.
+    df["_text_len"] = df["Target"].str.len()
 
-    # Combine: condition (3) × text_type (4) × rare_vocab (2) = 24 bins
+    # Use tertiles (33/33/33 split) for balanced bins
+    # Alternative: use quartiles for finer granularity if bins are large enough
+    length_bins = data_cfg.get("length_bins", 3)
+    if length_bins == 3:
+        df["_length_bin"] = pd.qcut(
+            df["_text_len"],
+            q=3,
+            labels=["short", "medium", "long"],
+            duplicates='drop'
+        )
+    elif length_bins == 4:
+        df["_length_bin"] = pd.qcut(
+            df["_text_len"],
+            q=4,
+            labels=["very_short", "short", "medium", "long"],
+            duplicates='drop'
+        )
+    else:
+        # Fallback to 2 bins if specified
+        df["_length_bin"] = pd.qcut(
+            df["_text_len"],
+            q=2,
+            labels=["short", "long"],
+            duplicates='drop'
+        )
+
+    # Combine: condition (3) × text_type (4) × length (3) = 36 bins
+    # Note: Removed rare_vocab - it was weakly predictive (0.24 correlation)
+    # and length is more important (competition metric is length-weighted)
     df["_bin"] = (df["_condition_bin"].astype(str) + "_" +
                   df["_text_type"].astype(str) + "_" +
-                  df["_rare_bin"].astype(str))
-
-    # Keep text_len for logging (no longer part of the stratification key,
-    # but still useful diagnostic info)
-    df["_text_len"] = df["Target"].str.len()
+                  df["_length_bin"].astype(str))
 
     # Store original index for duplicate-aware splitting
     df["_orig_idx"] = df.index
@@ -738,7 +755,7 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
     helper = ["_text_clean", "_dup_group", "_orig_idx", "_digit_density", "_uppercase_ratio", "_lexical_diversity",
               "_special_char_density", "_avg_word_length", "_has_digit", "_has_upper", "_text_len",
               "_has_interlineation", "_has_superscript",
-              "_condition_bin", "_text_type", "_has_rare", "_rare_bin", "_bin"]
+              "_condition_bin", "_text_type", "_length_bin", "_bin"]
 
     if group_col and group_col not in df.columns:
         raise ValueError(f"group_col '{group_col}' not in the CSV columns")
@@ -801,8 +818,8 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
             # zero exemplars of a recurring phrase purely by chance. sklearn's
             # splitters don't accept pre-assigned fold membership, so this
             # runs its own loop rather than producing an sklearn split_iter.
-            strat_desc = "condition (3) × text_type (4) × rare_vocab (2) = 24 bins" if has_condition \
-                else "text_type (4) × rare_vocab (2) = 8 bins"
+            strat_desc = "condition (3) × text_type (4) × length (3) = 36 bins" if has_condition \
+                else "text_type (4) × length (3) = 12 bins"
             print(f"Stratified {k_folds}-fold: {strat_desc}")
 
             rng = random.Random(seed)
@@ -854,7 +871,7 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
 
         else:
             # Standard k-fold (no group_col, no duplicate text at all)
-            strat_desc = "condition (3) × text_type (4) × rare_vocab (2) = 24 bins" if has_condition else "text_type (4) × rare_vocab (2) = 8 bins"
+            strat_desc = "condition (3) × text_type (4) × length (3) = 36 bins" if has_condition else "text_type (4) × length (3) = 12 bins"
             print(f"Stratified {k_folds}-fold: {strat_desc}")
             splitter = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
             split_iter = splitter.split(df, df["_bin"])
@@ -902,16 +919,13 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
             # `actual_strat_desc` records which level actually succeeded, so the
             # final summary print reflects reality instead of a static guess.
             #
-            # Fallback order (revised 2026-08-30): full (condition x text_type x
-            # rare_vocab) -> drop rare_vocab (condition x text_type) -> drop
-            # condition too (text_type alone). text_type is the floor here
-            # rather than a digit x upper cross, because text_type has no
-            # near-empty cell (smallest real category is has_digits at 217/4098,
-            # vs. the 6-sample digit-without-upper cell the old cross had) - so
-            # falling back to it is a much safer worst case than the old ladder's
-            # 4-bin digit x upper floor was.
-            full_bins_desc = "condition (3) × text_type (4) × rare_vocab (2) = 24 bins" if has_condition \
-                else "text_type (4) × rare_vocab (2) = 8 bins"
+            # Fallback order: full (condition x text_type x length) ->
+            # drop length (condition x text_type) -> drop condition (text_type alone).
+            # text_type is the floor because it has no near-empty cells
+            # (smallest category is has_digits at ~5% = 200+ samples), making it
+            # a safe worst case if grouped splitting creates too-small bins.
+            full_bins_desc = "condition (3) × text_type (4) × length (3) = 36 bins" if has_condition \
+                else "text_type (4) × length (3) = 12 bins"
             try:
                 split_train, split_val = train_test_split(
                     group_representatives,
@@ -927,7 +941,7 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
 
                 if has_condition:
                     try:
-                        # Medium fallback: drop rare_vocab, keep condition x text_type (12 bins)
+                        # Medium fallback: drop length, keep condition x text_type (12 bins)
                         group_representatives["_simple_bin"] = (
                             group_representatives["_condition_bin"].astype(str) + "_" +
                             group_representatives["_text_type"].astype(str)
@@ -1056,8 +1070,8 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
                     df, test_size=data_cfg["val_split"], stratify=df["_bin"], random_state=seed
                 )
 
-            actual_strat_desc = "condition (3) × text_type (4) × rare_vocab (2) = 24 bins" if has_condition \
-                else "text_type (4) × rare_vocab (2) = 8 bins"
+            actual_strat_desc = "condition (3) × text_type (4) × length (3) = 36 bins" if has_condition \
+                else "text_type (4) × length (3) = 12 bins"
 
         # Log distributions to verify stratification is working
         train_digits = train_df["_digit_density"]
@@ -1085,12 +1099,11 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
             train_cond = train_df["condition_score"]
             print(f"    Visual condition: min={train_cond.min():.1f}, median={train_cond.median():.1f}, max={train_cond.max():.1f}")
 
-        # text_type and rare_vocab distributions - the two factors actually
-        # driving the stratification key now (difficulty_score removed 2026-08-30)
+        # text_type and length distributions - the two text-based stratification factors
         train_text_type = train_df["_text_type"].value_counts(normalize=True).round(3).to_dict()
         val_text_type = val_df["_text_type"].value_counts(normalize=True).round(3).to_dict()
-        train_rare_pct = train_df["_has_rare"].mean() * 100
-        val_rare_pct = val_df["_has_rare"].mean() * 100
+        train_length_dist = train_df["_length_bin"].value_counts(normalize=True).round(3).to_dict()
+        val_length_dist = val_df["_length_bin"].value_counts(normalize=True).round(3).to_dict()
         # Caret sub-type counts - DIAGNOSTIC ONLY, not part of the stratification
         # key (see classify_caret_types docstring: interlineation is too rare,
         # ~23-25 total, to safely stratify on). Raw counts rather than
@@ -1101,7 +1114,7 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
         train_superscr_n = int(train_df["_has_superscript"].sum())
         val_superscr_n = int(val_df["_has_superscript"].sum())
         print(f"    Text type: {train_text_type}")
-        print(f"    Rare vocab: {train_rare_pct:.1f}%")
+        print(f"    Length bins: {train_length_dist}")
         print(f"    Caret sub-types: interlineation={train_interlin_n}, superscript={train_superscr_n}")
         print(f"    Digit density: min={train_digits.min():.3f}, median={train_digits.median():.3f}, max={train_digits.max():.3f}")
         print(f"    Uppercase ratio: min={train_upper.min():.3f}, median={train_upper.median():.3f}, max={train_upper.max():.3f}")
@@ -1115,7 +1128,7 @@ def make_splits(df: pd.DataFrame, data_cfg: dict):
             print(f"    Visual condition: min={val_cond.min():.1f}, median={val_cond.median():.1f}, max={val_cond.max():.1f}")
 
         print(f"    Text type: {val_text_type}")
-        print(f"    Rare vocab: {val_rare_pct:.1f}%")
+        print(f"    Length bins: {val_length_dist}")
         print(f"    Caret sub-types: interlineation={val_interlin_n}, superscript={val_superscr_n}")
         print(f"    Digit density: min={val_digits.min():.3f}, median={val_digits.median():.3f}, max={val_digits.max():.3f}")
         print(f"    Uppercase ratio: min={val_upper.min():.3f}, median={val_upper.median():.3f}, max={val_upper.max():.3f}")

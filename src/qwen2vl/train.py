@@ -388,10 +388,10 @@ class ImageAugmenter:
             return img
 
         # Adaptive augmentation based on document condition (4 classes)
-        # Thresholds verified 2026-08-30 against the actual document_condition.csv
-        # (see docstring above - this CSV still has text_contrast in the composite)
+        # Thresholds calibrated for VLM-based v2 scores (percentile-based)
+        # v2 scores are higher than old CV metrics → updated thresholds
         if condition_score is not None:
-            if condition_score < 8.07:  # Excellent condition (~22.9% of data)
+            if condition_score < 20.5:  # Excellent condition (25th percentile, ~24% of data)
                 # Synthesize degradation + standard geometric
                 p_degradation_mult = 1.2  # Add blur, noise, color variance
                 p_elastic_mult = 1.0
@@ -403,7 +403,7 @@ class ImageAugmenter:
                 p_contrast_mult = 1.0
                 elastic_alpha_override = self.elastic_alpha
 
-            elif condition_score < 23.38:  # Medium condition (~57.6% of data)
+            elif condition_score < 24.5:  # Medium condition (25-50th percentile, ~26% of data)
                 # Standard augmentation
                 p_degradation_mult = 1.0
                 p_elastic_mult = 1.0
@@ -415,7 +415,7 @@ class ImageAugmenter:
                 p_contrast_mult = 1.0
                 elastic_alpha_override = self.elastic_alpha
 
-            elif condition_score < 26.12:  # Poor condition (~10.1% of data - RARE!)
+            elif condition_score < 27.5:  # Poor condition (50-75th percentile, ~19% of data)
                 # RARE: No degradation, MORE geometric (1.5x)
                 # Includes faded-text documents (high text_contrast score)
                 p_degradation_mult = 0.0  # Already degraded/faded
@@ -428,7 +428,7 @@ class ImageAugmenter:
                 p_contrast_mult = 0.5     # Careful with faded ink
                 elastic_alpha_override = self.elastic_alpha * 1.4
 
-            else:  # Very Poor condition (>= 26.12, ~9.4% of data - RARE!)
+            else:  # Very Poor condition (>= 27.5, 75th+ percentile, ~32% of data)
                 # RARE: Extreme outliers need MAXIMUM geometric diversity
                 # Severely faded text + physical damage
                 p_degradation_mult = 0.0  # Already destroyed/severely faded
