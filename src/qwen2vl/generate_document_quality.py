@@ -279,10 +279,25 @@ def process_dataset(
     if resume and output_csv.exists():
         try:
             existing_df = pd.read_csv(output_csv)
-            existing_results = existing_df.set_index("ID").to_dict("index")
-            print(f"Resuming: {len(existing_results)} images already processed")
+
+            # Validate required columns
+            required_cols = {"ID", "physical_damage", "ink_degradation", "paper_condition",
+                           "text_readability", "composite_score", "success"}
+            if not required_cols.issubset(existing_df.columns):
+                missing = required_cols - set(existing_df.columns)
+                print(f"⚠️  Existing CSV missing columns {missing} - starting fresh")
+            else:
+                # Only load successful assessments to avoid propagating placeholder scores
+                valid_results = existing_df[existing_df["success"] == True].copy()
+                existing_results = valid_results.set_index("ID").to_dict("index")
+
+                n_total = len(existing_df)
+                n_valid = len(valid_results)
+                n_failed = n_total - n_valid
+
+                print(f"Resuming: {n_valid} valid results loaded ({n_failed} failed assessments will be retried)")
         except Exception as e:
-            print(f"Could not load existing results: {e}")
+            print(f"Could not load existing results: {e} - starting fresh")
 
     # Process images
     results = []
@@ -312,10 +327,14 @@ def process_dataset(
             img_path, model, processor, max_pixels=max_pixels
         )
 
+        # Track whether assessment succeeded BEFORE filling placeholders
+        assessment_succeeded = scores is not None
+
         if scores is None:
             print(f"  ⚠️  Assessment failed: {img_id}")
             failed_ids.append(img_id)
-            # Add placeholder scores (neutral)
+            # Add placeholder scores (neutral) - these will NOT be used in training
+            # because success=False filters them out in data_utils.py line 68
             scores = {
                 "physical_damage": 50.0,
                 "ink_degradation": 50.0,
@@ -334,19 +353,34 @@ def process_dataset(
             "paper_condition": scores["paper_condition"],
             "text_readability": scores["text_readability"],
             "composite_score": composite,
-            "success": scores is not None,
+            "success": assessment_succeeded,  # FIX: Use flag saved before placeholders
         }
         results.append(result)
 
         # Save checkpoint
         if (idx + 1) % save_interval == 0:
             df = pd.DataFrame(results)
-            df.to_csv(output_csv, index=False)
-            print(f"  Checkpoint saved: {len(results)} images processed")
+            # Validate before saving
+            if len(df) > 0 and "success" in df.columns:
+                # Create backup if file exists
+                backup_path = output_csv.with_suffix('.csv.bak')
+                if output_csv.exists():
+                    output_csv.rename(backup_path)
+                df.to_csv(output_csv, index=False)
+                # Remove backup after successful save
+                if output_csv.exists() and backup_path.exists():
+                    backup_path.unlink()
+                print(f"  Checkpoint saved: {len(results)} images processed ({df['success'].sum()} successful)")
 
-    # Final save
+    # Final save with backup
     df = pd.DataFrame(results)
+    backup_path = output_csv.with_suffix('.csv.bak')
+    if output_csv.exists():
+        output_csv.rename(backup_path)
     df.to_csv(output_csv, index=False)
+    # Remove backup after successful save
+    if output_csv.exists() and backup_path.exists():
+        backup_path.unlink()
 
     # Summary
     successful = sum(r["success"] for r in results)
