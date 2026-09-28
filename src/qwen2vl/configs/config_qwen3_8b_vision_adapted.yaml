@@ -21,7 +21,7 @@ model:
   torch_dtype: "bfloat16"
 
 training:
-  output_dir: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v2"
+  output_dir: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v3"
   batch_size: 2
   eval_batch_size: 2
   gradient_accumulation_steps: 8  # effective batch = 16
@@ -174,7 +174,7 @@ augmentation:
   max_pixels_ratio: 1.0
 
 inference:
-  checkpoint: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v2"
+  checkpoint: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v3"
   output_csv: "submission_vision_adapted.csv"
   max_new_tokens: 128
   num_beams: 5
