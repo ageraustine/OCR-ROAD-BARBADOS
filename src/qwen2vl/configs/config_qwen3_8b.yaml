@@ -38,7 +38,7 @@ training:
 
   # ELITE HYPERPARAMETERS - Optimized for 0.94 push
   epochs: 5  # Train longer (early stopping protects against overfitting)
-  learning_rate: 0.00005  # 5e-5 (PROVEN - achieved 0.90 before, optimal convergence speed)
+  learning_rate: 2e-5  # 5e-5 (PROVEN - achieved 0.90 before, optimal convergence speed)
   warmup_ratio: 0.1  # Shorter warmup = reach peak LR faster (was 0.15)
   lr_scheduler: "cosine"
 
@@ -78,23 +78,23 @@ training:
     'language_model\.layers\.20\.': 16
 
     # Late layers (21+): Heavy - generation patterns
-    'language_model\.layers\.2[1-9]\.': 32
-    'language_model\.layers\.3[0-9]\.': 32
+    'language_model\.layers\.2[1-9]\.': 16
+    'language_model\.layers\.3[0-9]\.': 16
 
   alpha_pattern:
     # Merger: 2x rank
-    'visual\.merger\.linear_fc1': 128
-    'visual\.merger\.linear_fc2': 128
-    'visual\.deepstack_merger_list\.\d+\.linear_fc1': 128
-    'visual\.deepstack_merger_list\.\d+\.linear_fc2': 128
+    'visual\.merger\.linear_fc1': 32
+    'visual\.merger\.linear_fc2': 32
+    'visual\.deepstack_merger_list\.\d+\.linear_fc1': 32
+    'visual\.deepstack_merger_list\.\d+\.linear_fc2': 32
 
     # LLM: standard 2x rank
     'language_model\.layers\.[0-9]\.': 16
     'language_model\.layers\.10\.': 16
     'language_model\.layers\.1[1-9]\.': 32
     'language_model\.layers\.20\.': 32
-    'language_model\.layers\.2[1-9]\.': 64
-    'language_model\.layers\.3[0-9]\.': 64
+    'language_model\.layers\.2[1-9]\.': 32
+    'language_model\.layers\.3[0-9]\.': 32
 
   # Target modules - MERGER + LLM (vision encoder frozen)
   lora_target_modules: '^model\.(?:visual\.(?:merger\.linear_fc[12]|deepstack_merger_list\.\d+\.linear_fc[12])|language_model\.layers\.\d+\.(?:self_attn\.[qkvo]_proj|mlp\.(?:gate|up|down)_proj))'

@@ -1,0 +1,162 @@
+# Qwen3-VL-8B HTR Configuration - Vision-Adapted Strategy
+# Based on empirical evidence: vision r=64 + LLM r=16 was the historical winner
+# This config unfreezes vision blocks with layer-wise rank allocation
+
+data:
+  train_csv: "dataset/Train.csv"
+  image_dir: "dataset/images"
+  val_split: 0.1
+  seed: 42
+  k_folds: 1
+  fuzzy_duplicate_threshold: 0.85
+  length_bins: 3  # Use tertiles for length stratification
+
+model:
+  model_name: "Qwen/Qwen3-VL-8B-Instruct"
+
+training:
+  output_dir: "outputs/qwen3_8b_vision_adapted"
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+  per_device_eval_batch_size: 2
+  epochs: 5
+  learning_rate: 0.00005  # 5e-5 proven optimal
+  warmup_ratio: 0.1
+  lr_scheduler: "cosine"
+
+  weight_decay: 0.05
+  max_grad_norm: 1.0
+  gradient_checkpointing: true
+
+  # OPTIMAL HTR LAYER STRATEGY (based on empirical evidence)
+  # Vision encoder: TRAINABLE with layer-wise ranks (early < middle < late)
+  # Merger: High capacity (critical vision→text bridge)
+  # LLM: Uniform r=16 (proven winner)
+
+  lora_r: 16  # Base rank for LLM (all layers uniform)
+  lora_alpha: 32
+  lora_dropout: 0.1
+  use_rslora: true
+  use_dora: false
+  loraplus_lr_ratio: null
+
+  # Layer-wise rank allocation
+  rank_pattern:
+    # VISION ENCODER - Layer-wise gradient (evidence shows this matters!)
+    # Early blocks (0-8): Lightweight - preserve general visual features
+    'visual\.blocks\.[0-8]\.attn\.qkv': 16
+    'visual\.blocks\.[0-8]\.attn\.proj': 16
+    'visual\.blocks\.[0-8]\.mlp\.linear_fc1': 16
+    'visual\.blocks\.[0-8]\.mlp\.linear_fc2': 16
+
+    # Middle blocks (9-17): Moderate - domain adaptation begins
+    'visual\.blocks\.(9|1[0-7])\.attn\.qkv': 32
+    'visual\.blocks\.(9|1[0-7])\.attn\.proj': 32
+    'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc1': 32
+    'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc2': 32
+
+    # Late blocks (18-26): High capacity - OCR-specific representations
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 64
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 64
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 64
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 64
+
+    # MERGER - High capacity (vision→text bridge)
+    'visual\.merger\.linear_fc1': 64
+    'visual\.merger\.linear_fc2': 64
+
+    # DEEPSTACK - Moderate capacity (multi-scale fusion)
+    'visual\.deepstack_merger_list\.\d+\.linear_fc1': 32
+    'visual\.deepstack_merger_list\.\d+\.linear_fc2': 32
+
+    # LLM - Uniform r=16 (proven winner, don't change)
+    # No LLM pattern needed - uses base lora_r=16
+
+  alpha_pattern:
+    # Vision early (r=16 → alpha=32)
+    'visual\.blocks\.[0-8]\.attn\.qkv': 32
+    'visual\.blocks\.[0-8]\.attn\.proj': 32
+    'visual\.blocks\.[0-8]\.mlp\.linear_fc1': 32
+    'visual\.blocks\.[0-8]\.mlp\.linear_fc2': 32
+
+    # Vision middle (r=32 → alpha=64)
+    'visual\.blocks\.(9|1[0-7])\.attn\.qkv': 64
+    'visual\.blocks\.(9|1[0-7])\.attn\.proj': 64
+    'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc1': 64
+    'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc2': 64
+
+    # Vision late (r=64 → alpha=128)
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 128
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 128
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 128
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 128
+
+    # Merger (r=64 → alpha=128)
+    'visual\.merger\.linear_fc1': 128
+    'visual\.merger\.linear_fc2': 128
+
+    # DeepStack (r=32 → alpha=64)
+    'visual\.deepstack_merger_list\.\d+\.linear_fc1': 64
+    'visual\.deepstack_merger_list\.\d+\.linear_fc2': 64
+
+  # Target modules - VISION + MERGER + LLM (all trainable)
+  lora_target_modules: '^model\.(?:visual\.(?:blocks\.\d+\.(?:attn\.(?:qkv|proj)|mlp\.linear_fc[12])|merger\.linear_fc[12]|deepstack_merger_list\.\d+\.linear_fc[12])|language_model\.layers\.\d+\.(?:self_attn\.[qkvo]_proj|mlp\.(?:gate|up|down)_proj))'
+
+  freeze_vision_tower: false  # CRITICAL: Vision needs adaptation for historical docs!
+  lora_modules_to_save: null
+
+  max_pixels: 2016000
+
+  eval_steps: 100
+  save_steps: 100
+  save_total_limit: 2
+
+  compute_cer: true
+  metric_for_best_model: "eval_score"
+
+  num_workers: 8
+  resume_from_checkpoint: true
+
+  cer_samples: 500
+
+  label_smoothing_factor: 0.05
+  neftune_noise_alpha: 5
+
+  early_stopping:
+    enabled: true
+    metric: "eval_score"
+    patience: 3
+    min_delta: 0.0001
+
+augmentation:
+  enabled: true  # VLM-based adaptive augmentation
+
+  # Degradation augmentations
+  p_blur: 0.15
+  p_noise: 0.15
+  p_brightness: 0.3
+  p_contrast: 0.3
+
+  # Geometric augmentations
+  p_rotate: 0.5
+  max_rotation: 2.0
+  p_shear: 0.4
+  max_shear: 3
+
+  # Elastic deformation
+  p_elastic: 0.3
+  elastic_alpha: 20
+  elastic_sigma: 6
+  elastic_interpolation: "bicubic"
+
+  # Color jitter
+  p_color: 0.2
+  color_jitter_brightness: 0.2
+  color_jitter_contrast: 0.2
+  color_jitter_saturation: 0.1
+  color_jitter_hue: 0.05
+
+  # Resolution
+  p_resolution: 0.2
+  min_pixels_ratio: 0.7
+  max_pixels_ratio: 1.0
