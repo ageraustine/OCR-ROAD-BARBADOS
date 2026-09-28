@@ -24,7 +24,7 @@ training:
   eval_batch_size: 2
   gradient_accumulation_steps: 8  # effective batch = 16
   epochs: 5
-  learning_rate: 5e-5  # Proven optimal (achieved 0.90+ with vision r=64)
+  learning_rate: 0.00005  # 5e-5 proven optimal (achieved 0.90+ with vision r=64)
   warmup_ratio: 0.1
   lr_scheduler: "cosine"
 
