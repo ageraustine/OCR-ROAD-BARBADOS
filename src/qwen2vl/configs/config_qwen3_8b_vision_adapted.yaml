@@ -4,23 +4,27 @@
 
 data:
   train_csv: "dataset/Train.csv"
+  test_csv: "dataset/Test.csv"
   image_dir: "dataset/images"
   val_split: 0.1
-  seed: 42
+  seed: 3407
   k_folds: 1
   fuzzy_duplicate_threshold: 0.85
   length_bins: 3  # Use tertiles for length stratification
 
 model:
-  model_name: "Qwen/Qwen3-VL-8B-Instruct"
+  name: "Qwen/Qwen3-VL-8B-Instruct"
+  use_flash_attention: true
+  use_quantization: false
+  torch_dtype: "bfloat16"
 
 training:
-  output_dir: "/content/drive/MyDrive/prd/qwen3-8B"
-  per_device_train_batch_size: 1
-  gradient_accumulation_steps: 4
-  per_device_eval_batch_size: 2
+  output_dir: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted"
+  batch_size: 2
+  eval_batch_size: 2
+  gradient_accumulation_steps: 8  # effective batch = 16
   epochs: 5
-  learning_rate: 0.00005  # 5e-5 proven optimal
+  learning_rate: 5e-5  # Proven optimal (achieved 0.90+ with vision r=64)
   warmup_ratio: 0.1
   lr_scheduler: "cosine"
 
@@ -160,3 +164,11 @@ augmentation:
   p_resolution: 0.2
   min_pixels_ratio: 0.7
   max_pixels_ratio: 1.0
+
+inference:
+  checkpoint: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted"
+  output_csv: "submission_vision_adapted.csv"
+  max_new_tokens: 128
+  num_beams: 5
+  repetition_penalty: 1.0
+  batch_size: 4
