@@ -127,6 +127,9 @@ training:
   label_smoothing_factor: 0.05
   neftune_noise_alpha: 5
 
+  # Skip samples where assistant header can't be found (longer prompt may cause truncation)
+  strict_masking: false
+
   early_stopping:
     enabled: true
     metric: "eval_score"
