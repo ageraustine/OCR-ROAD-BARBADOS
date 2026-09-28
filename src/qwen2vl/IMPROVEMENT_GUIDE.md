@@ -44,6 +44,37 @@ Transcribe only what you see in the image—nothing more."
 
 **Expected:** Reduces hallucinations (validation error #1 type), could improve by Δ -0.005 to -0.010
 
+### 1.5. Conservative Augmentation (Critical Fix)
+
+**OLD (over-aggressive for degraded docs):**
+```yaml
+p_blur: 0.15      # ❌ Adding blur to already-blurred documents!
+p_noise: 0.15     # ❌ Adding noise to already-noisy documents!
+p_elastic: 0.3    # ❌ Warping already-warped pages!
+p_rotate: 0.5
+p_shear: 0.4
+```
+
+**NEW (conservative, per CLAUDE.md guidance):**
+```yaml
+p_blur: 0.0       # ✅ DISABLED - docs already degraded
+p_noise: 0.0      # ✅ DISABLED - docs already have grain
+p_elastic: 0.0    # ✅ DISABLED - pages already warped
+p_brightness: 0.3 # ✅ Scan exposure variance (OK)
+p_contrast: 0.3   # ✅ Ink fade variance (OK)
+p_rotate: 0.3     # ✅ Reduced - alignment variance only
+p_shear: 0.2      # ✅ Reduced - slant variance only
+```
+
+**Why this matters:**
+- Documents are **already degraded** (faded ink, grain, warping)
+- Adding more degradation forces model to learn unrealistic combinations
+- Could explain why validation performed worse than expected
+
+✅ **Updated in `config_qwen3_8b_vision_adapted.yaml`**
+
+**Expected:** Could improve by Δ -0.010 to -0.015 (model sees cleaner augmentations closer to test distribution)
+
 ### 2. Vision Rank Increase (r=96 Late Blocks)
 
 The config has been updated to increase vision capacity where it matters:
@@ -70,7 +101,11 @@ The config has been updated to increase vision capacity where it matters:
 
 **Expected improvement:** 0.905 → 0.885-0.890 (Δ -0.015 to -0.020)
 
-**Combined with prompt change:** Could reach 0.880-0.885 (Δ -0.020 to -0.025)
+**Combined improvements (prompt + augmentation + vision rank):**
+- Cleaner prompt: Δ -0.005 to -0.010
+- Conservative augmentation: Δ -0.010 to -0.015
+- Vision rank r=96: Δ -0.015 to -0.020
+- **Total expected: 0.905 → 0.865-0.880** (Δ -0.025 to -0.040)
 
 ### Training
 
@@ -132,9 +167,9 @@ Modify training to oversample or weight these higher.
 
 | Intervention | Target Score | Effort | Priority |
 |--------------|--------------|--------|----------|
-| Prompt + Vision r=96 | 0.880-0.885 | 6-8 hrs | ⭐⭐⭐ |
-| + TTA | 0.875-0.880 | 1-2 days | ⭐⭐ |
-| + Ensemble (3 models) | 0.870-0.875 | 3-4 days | ⭐ |
+| Prompt + Aug + Vision r=96 | 0.865-0.880 | 6-8 hrs | ⭐⭐⭐ |
+| + TTA | 0.860-0.875 | 1-2 days | ⭐⭐ |
+| + Ensemble (3 models) | 0.855-0.870 | 3-4 days | ⭐ |
 
 ## Bottom Line
 

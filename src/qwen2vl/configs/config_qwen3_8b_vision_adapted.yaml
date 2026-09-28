@@ -143,20 +143,20 @@ training:
 augmentation:
   enabled: true  # VLM-based adaptive augmentation
 
-  # Degradation augmentations
-  p_blur: 0.15
-  p_noise: 0.15
-  p_brightness: 0.3
-  p_contrast: 0.3
+  # Degradation augmentations - CONSERVATIVE for already-degraded historical docs
+  p_blur: 0.0      # DISABLED - documents already blurred/faded
+  p_noise: 0.0     # DISABLED - documents already have grain/noise
+  p_brightness: 0.3  # Simulates scan exposure variance
+  p_contrast: 0.3    # Simulates ink fade variance
 
-  # Geometric augmentations
-  p_rotate: 0.5
-  max_rotation: 2.0
-  p_shear: 0.4
-  max_shear: 3
+  # Geometric augmentations - LIGHT (only alignment/slant variance)
+  p_rotate: 0.3      # Reduced from 0.5 - simulates ±2° alignment variance
+  max_rotation: 2.0  # Small rotation OK
+  p_shear: 0.2       # Reduced from 0.4 - simulates scribe slant variance
+  max_shear: 2       # Reduced from 3 - conservative slant
 
-  # Elastic deformation
-  p_elastic: 0.3
+  # Elastic deformation - DISABLED (documents already warped)
+  p_elastic: 0.0     # DISABLED - historical pages already have warping/curling
   elastic_alpha: 20
   elastic_sigma: 6
   elastic_interpolation: "bicubic"
