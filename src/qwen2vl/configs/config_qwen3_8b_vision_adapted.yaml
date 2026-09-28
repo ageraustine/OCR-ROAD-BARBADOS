@@ -1,6 +1,7 @@
 # Qwen3-VL-8B HTR Configuration - Vision-Adapted Strategy
 # Based on empirical evidence: vision r=64 + LLM r=16 was the historical winner
-# This config unfreezes vision blocks with layer-wise rank allocation
+# This config uses LLM r=8 (reduced from r=16 to prevent overfitting)
+# Vision blocks unfrozen with layer-wise rank allocation
 
 data:
   train_csv: "dataset/Train.csv"
@@ -35,10 +36,10 @@ training:
   # OPTIMAL HTR LAYER STRATEGY (based on empirical evidence)
   # Vision encoder: TRAINABLE with layer-wise ranks (early < middle < late)
   # Merger: High capacity (critical vision→text bridge)
-  # LLM: Uniform r=16 (proven winner)
+  # LLM: Uniform r=8 (reduced to prevent overfitting)
 
-  lora_r: 16  # Base rank for LLM (all layers uniform)
-  lora_alpha: 32
+  lora_r: 8  # Base rank for LLM (all layers uniform, reduced from r=16)
+  lora_alpha: 16  # 2x rank
   lora_dropout: 0.1
   use_rslora: true
   use_dora: false
@@ -73,8 +74,8 @@ training:
     'visual\.deepstack_merger_list\.\d+\.linear_fc1': 32
     'visual\.deepstack_merger_list\.\d+\.linear_fc2': 32
 
-    # LLM - Uniform r=16 (proven winner, don't change)
-    # No LLM pattern needed - uses base lora_r=16
+    # LLM - Uniform r=8 (reduced to prevent overfitting)
+    # No LLM pattern needed - uses base lora_r=8
 
   alpha_pattern:
     # Vision early (r=16 → alpha=32)

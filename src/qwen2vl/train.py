@@ -74,8 +74,11 @@ TF_MAJOR = int(transformers.__version__.split(".")[0])
 SCRIPT_DIR = Path(__file__).parent
 
 OCR_PROMPT = (
-    "Transcribe the handwritten text in this image exactly as written. "
-    "Preserve spelling, punctuation, and line breaks. Output only the transcription."
+    "Transcribe this 17th-18th century handwritten document image exactly as written. "
+    "Preserve original spelling (e.g., \"publique\", \"prsence\", \"whome\"), "
+    "capitalization including mid-sentence capitals, all punctuation marks, "
+    "and special marks like ^ (interlineations). "
+    "Do not modernize or correct spelling. Output only the transcription text."
 )
 
 ASSISTANT_HEADER = "<|im_start|>assistant\n"

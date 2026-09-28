@@ -1,0 +1,10 @@
+Transcribe this 17th-18th century handwritten document image exactly as written.
+
+Important guidelines:
+- Preserve original spelling (e.g., "publique", "prsence", "whome")
+- Maintain capitalization, including mid-sentence capitals
+- Keep all punctuation marks exactly as shown
+- Preserve special marks like ^ (interlineations)
+- Write numbers and dates as they appear
+- Do not modernize or correct spelling
+- Output only the transcription text
