@@ -1,0 +1,194 @@
+/content/road-training/ROAD/src/qwen2vl
+Failed to load /usr/local/lib/python3.13/dist-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /usr/local/lib/python3.13/dist-packages/torchao/_C_cutlass_90a.abi3.so
+Failed to load /usr/local/lib/python3.13/dist-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /usr/local/lib/python3.13/dist-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+Loading model from /content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v2/best...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Downloading bytes:           |  0.00B            
+Reconstructing (incomplete total...): |          |  0.00B /  0.00B            
+
+Fetching 4 files: 100% 4/4 [00:00<00:00, 1402.54it/s]
+Download complete: :           |  0.00B            
+Download complete: :           |  0.00B            
+Reconstruction complete: |          |  0.00B /  0.00B            
+Loading weights: 100% 750/750 [00:04<00:00, 161.14it/s]
+Loading weights: 100% 736/736 [00:00<00:00, 2033.32it/s]
+
+Loading validation data...
+Loaded 4098 samples from Train.csv
+Loaded VLM-based document condition scores from document_condition_v2.csv
+  Mean: 24.6, Median: 24.5, Std: 8.5
+Checking for duplicate and near-duplicate texts (fuzzy boilerplate detection)...
+  Exact matches: 15 unique texts (39 samples)
+  Scanning 4059 ungrouped samples for fuzzy duplicates (threshold=0.85)...
+  Fuzzy matches: 46 samples grouped into 20 boilerplate clusters
+  Total grouped: 85 samples (39 exact + 46 fuzzy)
+  ✓ Visual condition stratification enabled (3 VLM-based bins: <20.5 / 20.5-27.5 / >=27.5)
+  ✓ Distributed 85 samples from 35 duplicate-text groups across train/val (35 val / 50 train) - every group with 2+ members has at least one exemplar on each side
+Stratified split: condition (3) × text_type (4) × length (3) = 36 bins
+  Train: 3688 samples
+    Visual condition: min=0.0, median=24.5, max=68.0
+    Text type: {'names_only': 0.595, 'plain': 0.21, 'has_caret': 0.143, 'has_digits': 0.053}
+    Length bins: {'medium': 0.346, 'short': 0.341, 'long': 0.313}
+    Caret sub-types: interlineation=22, superscript=607
+    Digit density: min=0.000, median=0.000, max=0.227
+    Uppercase ratio: min=0.000, median=0.039, max=0.229
+    Lexical diversity: min=0.308, median=0.938, max=1.000
+    Text length: min=37, median=62, max=120
+  Val:   410 samples
+    Visual condition: min=9.5, median=22.5, max=57.0
+    Text type: {'names_only': 0.617, 'plain': 0.195, 'has_caret': 0.134, 'has_digits': 0.054}
+    Length bins: {'short': 0.349, 'medium': 0.341, 'long': 0.31}
+    Caret sub-types: interlineation=3, superscript=61
+    Digit density: min=0.000, median=0.000, max=0.136
+    Uppercase ratio: min=0.000, median=0.037, max=0.213
+    Lexical diversity: min=0.417, median=0.933, max=1.000
+    Text length: min=38, median=61, max=98
+Validation set: 410 samples
+
+Generating predictions...
+Generating predictions: 100% 103/103 [08:44<00:00,  5.09s/it]
+
+Analyzing error patterns...
+
+================================================================================
+VALIDATION ERROR ANALYSIS REPORT
+================================================================================
+
+OVERALL METRICS:
+  Samples: 410
+  Mean CER: 0.0467
+  Mean WER: 0.1498
+  Mean Score (0.5*CER + 0.5*WER): 0.0983
+  Median CER: 0.0286
+  Median WER: 0.1250
+
+  Normalized Word Accuracy:
+    ≤1 char diff: 87.77%
+    ≤2 char diff: 90.26%
+
+--------------------------------------------------------------------------------
+BREAKDOWN BY CATEGORY:
+--------------------------------------------------------------------------------
+
+CONDITION TIER:
+  poor            (n= 67): CER=0.0729, WER=0.2048, Score=0.1388
+                           NW_acc(≤1)=86.80%
+  very_poor       (n=124): CER=0.0599, WER=0.1850, Score=0.1224
+                           NW_acc(≤1)=82.34%
+  medium          (n=115): CER=0.0344, WER=0.1170, Score=0.0757
+                           NW_acc(≤1)=91.93%
+  excellent       (n=104): CER=0.0278, WER=0.1088, Score=0.0683
+                           NW_acc(≤1)=90.28%
+
+TEXT TYPE:
+  has_digits      (n= 22): CER=0.0810, WER=0.1938, Score=0.1374
+                           NW_acc(≤1)=81.73%
+  has_caret       (n= 55): CER=0.0621, WER=0.2022, Score=0.1322
+                           NW_acc(≤1)=85.92%
+  names_only      (n=253): CER=0.0473, WER=0.1523, Score=0.0998
+                           NW_acc(≤1)=87.70%
+  plain           (n= 80): CER=0.0247, WER=0.0941, Score=0.0594
+                           NW_acc(≤1)=90.95%
+
+LENGTH TIER:
+  short           (n=133): CER=0.0606, WER=0.1720, Score=0.1163
+                           NW_acc(≤1)=86.00%
+  long            (n=139): CER=0.0414, WER=0.1384, Score=0.0899
+                           NW_acc(≤1)=89.05%
+  medium          (n=138): CER=0.0386, WER=0.1400, Score=0.0893
+                           NW_acc(≤1)=88.19%
+
+CARET TYPE:
+  interlineation  (n=  3): CER=0.0837, WER=0.1783, Score=0.1310
+  superscript     (n= 61): CER=0.0615, WER=0.1985, Score=0.1300
+
+--------------------------------------------------------------------------------
+TOP 20 ERRORS BY WER:
+--------------------------------------------------------------------------------
+
+1. ID: OZIW7t7vNxIW98CB | WER=1.375, CER=1.057
+   GT:   King of England Scotland Ffrance and Ireland Defender
+   PRED: Soveraigne Lord Charles the Second by the grace of God King of England Scotland ffrance and Ireland 
+   [truncated]
+
+2. ID: mfQxfOmeRmwBh0g8 | WER=0.917, CER=0.756
+   GT:   0 4 __ Horses ___ ___ ___ ___ ___ ___ ___ ___
+   PRED: 04 - Horses -
+
+3. ID: V4lGCqOjZxAuz956 | WER=0.778, CER=0.244
+   GT:   aforesaid To Have , Hold , Receive , perceive
+   PRED: aforesaid To have, hold, receive, possesse
+
+4. ID: Gh9CnJ3UB9Ig6ywl | WER=0.600, CER=0.311
+   GT:   Lett on the S.^d PremiSses to be in the Place
+   PRED: Left in the s^d Chests to bee in the Case
+
+5. ID: MrDIddE0O11KlVrW | WER=0.583, CER=0.082
+   GT:   Giue , grant , Release , and Confirme, unto y^e Saide Richard
+   PRED: Give, grant, Release, and Confirme, unto y^e. Saide Richard
+
+6. ID: Jz4fqVSNJsjxc2DN | WER=0.571, CER=0.184
+   GT:   things , devises assureunces and convegences in the law bee it by fine comon
+   PRED: things, devides, assurances, and conveyances in the Law bee it by five known
+
+7. ID: Mu3q1uOG2qUt6AwD | WER=0.556, CER=0.128
+   GT:   for Wind ward of Guardalope and ordinary of the
+   PRED: to windward of Guarda loupe and ordinary of the
+
+8. ID: XNt6oft5KThqk6ew | WER=0.556, CER=0.102
+   GT:   Land & Premisses , Every P:^t thereof To himSelfe
+   PRED: Land & Premisses, & Every p:^t thereof to himselfe
+
+9. ID: hxcWILug6sySoYP7 | WER=0.500, CER=0.069
+   GT:   there to apperteyneing And alsoe two stills, still heads &
+   PRED: thereto apperteyneing And alsoe Two Stills, Still heads &
+
+10. ID: 1IQ3BZVPaFSGf1Wp | WER=0.500, CER=0.093
+   GT:   Ensealeinge of these p^esents (the reciept whereof the
+   PRED: Ensealeinge of these p:sents (the receipt where of the
+
+11. ID: VfA8Rllc17Tz2PUR | WER=0.467, CER=0.250
+   GT:   two Sales bearing date and w^th these adults and all the mograge Land Chattles buildings
+   PRED: two Sales beareing date Even in the Presents and all the Negroes and Chattles buildings
+
+12. ID: XJgJexw5nQLlxSGI | WER=0.444, CER=0.091
+   GT:   bargaine sell alienate enfeoffe and Confirmd ; unto the
+   PRED: bargained Sell alienate enfeoffe and Confirme, unto the
+
+13. ID: CfUGhlXL85SIizAu | WER=0.429, CER=0.138
+   GT:   heires and assignes for xxx and discharged of and from all former bargaines sale
+   PRED: heires and assignes for xxx and discharged of and from all former bargaines sales x x x x x
+
+14. ID: 2nuLYXydaa4eJQRj | WER=0.429, CER=0.043
+   GT:   all other papers writings Evidences , Escripts
+   PRED: all other papers writings Evidences, Escript
+
+15. ID: QsoYWbDpit1yQBXH | WER=0.429, CER=0.093
+   GT:   ove~ name Judith Powrey appeared before mee
+   PRED: one ~ name Judith Povey appeared before mee
+
+16. ID: 8Z3V3UIIQ06yCH9L | WER=0.429, CER=0.095
+   GT:   an...Colleton made one and the same Answer
+   PRED: and Colleton made one and the same Answere
+
+17. ID: OSYQZaQGaaTqO8wG | WER=0.429, CER=0.203
+   GT:   yeare of Our Lord God one thousand Six Hundred and sixty & & fiv
+   PRED: yeare of our Lord God one thousand six hundred sixty &
+
+18. ID: vr8RbWnLaMGq9RyH | WER=0.400, CER=0.107
+   GT:   Greetinge in Our Lord god everlasting know ye that Lieft
+   PRED: Greetinge in our Lord god everlasting Know ye that I Leift
+
+19. ID: WYOvdBMQEI5kdKLV | WER=0.400, CER=0.176
+   GT:   that the said ship w.^th hath beene above two years
+   PRED: that his said ship w.^th have spent above two yeares
+
+20. ID: 4DsnLbOz0q6IqEFm | WER=0.400, CER=0.167
+   GT:   putt yeoven the day & yeare ffirst above written Annog
+   PRED: putt yeare the day & yeare ffirst a true written Annoye
+
+================================================================================
+
+Detailed results saved to: /content/road-training/ROAD/validation_error_analysis.json
+Per-sample CSV saved to: /content/road-training/ROAD/validation_error_analysis.csv
+/content/road-training/ROAD

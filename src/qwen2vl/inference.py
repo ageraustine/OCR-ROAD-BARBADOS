@@ -59,11 +59,9 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 OCR_PROMPT = (
-    "Transcribe this 17th-18th century handwritten document image exactly as written. "
-    "Preserve original spelling (e.g., \"publique\", \"prsence\", \"whome\"), "
-    "capitalization including mid-sentence capitals, all punctuation marks, "
-    "and special marks like ^ (interlineations). "
-    "Do not modernize or correct spelling. Output only the transcription text."
+    "Transcribe the visible text exactly as written. "
+    "Preserve all spelling, capitalization, punctuation, and special characters. "
+    "Transcribe only what you see in the image—nothing more."
 )
 
 
