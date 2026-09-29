@@ -174,8 +174,8 @@ inference:
   checkpoint: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v3"
   output_csv: "submission_vision_adapted.csv"
   max_new_tokens: 150          # Increased for long texts with underscores
-  num_beams: 3                 # Reduced - less over-generation
-  repetition_penalty: 1.2      # CRITICAL: 20% penalty for hallucinations (validation showed CER>1.0!)
-  length_penalty: 0.8          # Slightly favor shorter outputs
-  no_repeat_ngram_size: 0      # Allow exact repetition (for "___" sequences)
+  num_beams: 3                 # Reduced from 5 - less over-generation
+  repetition_penalty: 1.0      # NO PENALTY - historical docs have legitimate repetition!
+  length_penalty: 1.0          # Neutral (was 0.8, but let model decide length)
+  no_repeat_ngram_size: 0      # Allow exact repetition (for "___" sequences and boilerplate)
   batch_size: 4

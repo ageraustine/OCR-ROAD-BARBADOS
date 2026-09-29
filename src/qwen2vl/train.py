@@ -1030,7 +1030,7 @@ class CERCallback(TrainerCallback):
                     max_new_tokens=self.max_new_tokens,
                     do_sample=False,
                     num_beams=1,  # Greedy for eval (faster than beam search)
-                    repetition_penalty=1.2,  # CRITICAL: 20% penalty for hallucinated boilerplate (was 1.0, severe hallucinations observed)
+                    repetition_penalty=1.0,  # NO PENALTY during training eval (historical docs have legitimate repetition)
                     eos_token_id=tokenizer.eos_token_id,  # Explicitly enforce stop token
                     pad_token_id=tokenizer.pad_token_id,
                 )

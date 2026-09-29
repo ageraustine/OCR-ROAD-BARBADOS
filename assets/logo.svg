@@ -1,0 +1,72 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFA500;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF8C00;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="paperGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F5E6D3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E8D5B7;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background Circle -->
+  <circle cx="100" cy="100" r="95" fill="url(#goldGradient)" filter="url(#shadow)"/>
+  <circle cx="100" cy="100" r="90" fill="#2C1810" opacity="0.1"/>
+
+  <!-- Historical Document -->
+  <g transform="translate(50, 40)">
+    <!-- Paper -->
+    <rect x="0" y="0" width="100" height="130" rx="3" fill="url(#paperGradient)" filter="url(#shadow)"/>
+
+    <!-- Aged paper texture -->
+    <rect x="0" y="0" width="100" height="130" rx="3" fill="#8B7355" opacity="0.1"/>
+
+    <!-- Document fold -->
+    <path d="M 90,0 L 100,10 L 100,0 Z" fill="#D4AF37" opacity="0.3"/>
+
+    <!-- Handwritten text lines (stylized) -->
+    <g opacity="0.7">
+      <!-- Title line -->
+      <path d="M 15,20 Q 30,18 45,20 T 75,20" stroke="#654321" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+      <!-- Body text lines -->
+      <line x1="15" y1="35" x2="85" y2="35" stroke="#654321" stroke-width="1.5" opacity="0.8"/>
+      <line x1="15" y1="45" x2="80" y2="45" stroke="#654321" stroke-width="1.5" opacity="0.8"/>
+      <line x1="15" y1="55" x2="85" y2="55" stroke="#654321" stroke-width="1.5" opacity="0.8"/>
+
+      <!-- Stylized cursive text -->
+      <path d="M 15,70 Q 25,68 35,70 Q 45,72 55,70 Q 65,68 75,70" stroke="#654321" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <path d="M 15,80 Q 30,78 45,80 Q 60,82 70,80" stroke="#654321" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+
+      <!-- Caret insertion mark (^) -->
+      <path d="M 40,63 L 43,58 L 46,63" stroke="#8B0000" stroke-width="1.2" fill="none"/>
+
+      <!-- More text lines -->
+      <line x1="15" y1="95" x2="85" y2="95" stroke="#654321" stroke-width="1.5" opacity="0.8"/>
+      <line x1="15" y1="105" x2="75" y2="105" stroke="#654321" stroke-width="1.5" opacity="0.8"/>
+      <line x1="15" y1="115" x2="85" y2="115" stroke="#654321" stroke-width="1.5" opacity="0.8"/>
+    </g>
+
+    <!-- Wax seal -->
+    <circle cx="80" cy="110" r="12" fill="url(#goldGradient)"/>
+    <circle cx="80" cy="110" r="9" fill="#8B0000" opacity="0.3"/>
+    <text x="80" y="115" text-anchor="middle" font-family="serif" font-size="12" font-weight="bold" fill="#FFD700">R</text>
+  </g>
+
+  <!-- AI Vision Overlay (scan lines) -->
+  <g opacity="0.3">
+    <line x1="45" y1="50" x2="155" y2="50" stroke="#00FFFF" stroke-width="0.5" stroke-dasharray="2,2"/>
+    <line x1="45" y1="80" x2="155" y2="80" stroke="#00FFFF" stroke-width="0.5" stroke-dasharray="2,2"/>
+    <line x1="45" y1="110" x2="155" y2="110" stroke="#00FFFF" stroke-width="0.5" stroke-dasharray="2,2"/>
+    <line x1="45" y1="140" x2="155" y2="140" stroke="#00FFFF" stroke-width="0.5" stroke-dasharray="2,2"/>
+  </g>
+
+  <!-- Decorative border -->
+  <circle cx="100" cy="100" r="94" fill="none" stroke="url(#goldGradient)" stroke-width="2"/>
+  <circle cx="100" cy="100" r="88" fill="none" stroke="#FFD700" stroke-width="0.5" opacity="0.5"/>
+</svg>
