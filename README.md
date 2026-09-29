@@ -192,8 +192,8 @@ ROAD/
 
 ```bash
 # Clone the repository
-git clone https://github.com/ageraustine/ROAD.git
-cd ROAD
+git clone https://github.com/ageraustine/OCR-ROAD-BARBADOS.git
+cd OCR-ROAD-BARBADOS
 
 # Install dependencies
 cd src/qwen2vl
