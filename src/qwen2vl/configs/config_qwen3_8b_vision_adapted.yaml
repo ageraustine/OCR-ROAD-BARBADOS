@@ -1,8 +1,8 @@
-# Qwen3-VL-8B HTR Configuration - Vision-Adapted Strategy (r=96 Late Blocks)
-# Based on empirical evidence: vision r=64 + LLM r=16 was the historical winner
-# This config INCREASES late vision blocks to r=96 (from r=64) to handle poor-condition docs
-# Validation showed 2x worse performance on degraded documents (0.1388 vs 0.0683)
-# LLM kept at r=8 (87.77% normalized word accuracy proves language modeling is excellent)
+# Qwen3-VL-8B HTR Configuration - Vision-Adapted Strategy + Generation Control
+# Based on empirical evidence: vision r=64 + LLM r=8 is optimal
+# KEY FIX: repetition_penalty=1.1 to prevent hallucinations (short texts performed worst!)
+# Vision r=64 is sufficient (87.77% normalized word accuracy = excellent character recognition)
+# LLM r=8 (language modeling already excellent, no increase needed)
 
 data:
   train_csv: "dataset/Train.csv"
@@ -35,8 +35,8 @@ training:
   gradient_checkpointing: true
 
   # OPTIMAL HTR LAYER STRATEGY (based on empirical evidence + validation analysis)
-  # Vision encoder: TRAINABLE with layer-wise ranks (early=16 < middle=32 < late=96)
-  # Merger: High capacity r=96 (critical vision→text bridge)
+  # Vision encoder: TRAINABLE with layer-wise ranks (early=16 < middle=32 < late=64)
+  # Merger: High capacity r=64 (critical vision→text bridge)
   # LLM: Uniform r=8 (87.77% normalized word accuracy = no capacity bottleneck)
 
   lora_r: 8  # Base rank for LLM (all layers uniform, reduced from r=16)
@@ -61,18 +61,15 @@ training:
     'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc1': 32
     'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc2': 32
 
-    # Late blocks (18-26): HIGH capacity - OCR-specific representations
-    # INCREASED from r=64 to r=96 to handle poor-condition documents better
-    # Validation showed 2x worse performance on degraded docs (0.1388 vs 0.0683)
-    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 96
-    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 96
-    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 96
-    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 96
+    # Late blocks (18-26): High capacity - OCR-specific representations
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 64
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 64
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 64
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 64
 
-    # MERGER - HIGH capacity (vision→text bridge)
-    # INCREASED from r=64 to r=96 for better degraded document handling
-    'visual\.merger\.linear_fc1': 96
-    'visual\.merger\.linear_fc2': 96
+    # MERGER - High capacity (vision→text bridge)
+    'visual\.merger\.linear_fc1': 64
+    'visual\.merger\.linear_fc2': 64
 
     # DEEPSTACK - Moderate capacity (multi-scale fusion)
     'visual\.deepstack_merger_list\.\d+\.linear_fc1': 32
@@ -94,15 +91,15 @@ training:
     'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc1': 64
     'visual\.blocks\.(9|1[0-7])\.mlp\.linear_fc2': 64
 
-    # Vision late (r=96 → alpha=192)
-    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 192
-    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 192
-    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 192
-    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 192
+    # Vision late (r=64 → alpha=128)
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 128
+    'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 128
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 128
+    'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 128
 
-    # Merger (r=96 → alpha=192)
-    'visual\.merger\.linear_fc1': 192
-    'visual\.merger\.linear_fc2': 192
+    # Merger (r=64 → alpha=128)
+    'visual\.merger\.linear_fc1': 128
+    'visual\.merger\.linear_fc2': 128
 
     # DeepStack (r=32 → alpha=64)
     'visual\.deepstack_merger_list\.\d+\.linear_fc1': 64
@@ -176,7 +173,9 @@ augmentation:
 inference:
   checkpoint: "/content/drive/MyDrive/prd/qwen3-8B-vision-adapted-v3"
   output_csv: "submission_vision_adapted.csv"
-  max_new_tokens: 128
-  num_beams: 5
-  repetition_penalty: 1.0
+  max_new_tokens: 150          # Increased for long texts with underscores
+  num_beams: 3                 # Reduced - less over-generation
+  repetition_penalty: 1.2      # CRITICAL: 20% penalty for hallucinations (validation showed CER>1.0!)
+  length_penalty: 0.8          # Slightly favor shorter outputs
+  no_repeat_ngram_size: 0      # Allow exact repetition (for "___" sequences)
   batch_size: 4

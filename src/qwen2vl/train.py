@@ -1029,8 +1029,8 @@ class CERCallback(TrainerCallback):
                     **inputs,
                     max_new_tokens=self.max_new_tokens,
                     do_sample=False,
-                    num_beams=1,  # FIXED: Match inference decoder (was greedy=1, caused checkpoint selection bias)
-                    repetition_penalty=1.0,  # FIXED: Match inference (legal boilerplate has legitimate repetition)
+                    num_beams=1,  # Greedy for eval (faster than beam search)
+                    repetition_penalty=1.2,  # CRITICAL: 20% penalty for hallucinated boilerplate (was 1.0, severe hallucinations observed)
                     eos_token_id=tokenizer.eos_token_id,  # Explicitly enforce stop token
                     pad_token_id=tokenizer.pad_token_id,
                 )

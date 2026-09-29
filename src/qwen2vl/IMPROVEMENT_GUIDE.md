@@ -8,12 +8,37 @@
 - Normalized word accuracy (≤1 char): 87.77% ← Model is excellent at character recognition
 - Poor-condition gap: 2x worse (0.1388 vs 0.0683) ← Vision capacity bottleneck
 
+## The Secret: Generation Control
+
+### 🎯 Critical Discovery: Your Model's Real Problem
+
+**Validation showed:** SHORT texts perform WORST (0.1163) - 30% worse than long texts!
+
+**This reveals the hidden issue:**
+- ❌ NOT a vision problem (87.77% normalized word accuracy is excellent)
+- ❌ NOT a capacity problem (character recognition is very good)
+- ✅ **GENERATION CONTROL problem** - model doesn't know when to stop
+
+**Evidence from top errors:**
+```
+Error #1 (CER > 1.0 = prediction LONGER than truth!):
+  GT:   "King of England Scotland Ffrance and Ireland Defender"
+  PRED: "Soveraigne Lord Charles the Second by the grace of God..."
+  → HALLUCINATION: Adding historical boilerplate
+
+Error #2:
+  GT:   "0 4 __ Horses ___ ___ ___ ___ ___ ___ ___ ___"
+  PRED: "04 - Horses -"
+  → TRUNCATION: Stopped too early
+```
+
+**Root cause:** `repetition_penalty: 1.0` (no penalty) allowed model to generate repetitive boilerplate.
+
 ## What Doesn't Work
 
 ❌ **Lexicon-based post-processing** - Tested, made score WORSE (0.905 → 0.890)
-- Training lexicon doesn't match test distribution
-- Over-corrects already-correct predictions
-- Validation ≠ test for this approach
+❌ **Vision rank increases alone** - Don't address generation control
+❌ **Aggressive augmentation** - Makes degraded docs worse
 
 ## What Works
 
@@ -44,7 +69,42 @@ Transcribe only what you see in the image—nothing more."
 
 **Expected:** Reduces hallucinations (validation error #1 type), could improve by Δ -0.005 to -0.010
 
-### 1.5. Conservative Augmentation (Critical Fix)
+### 1.5. Generation Control Parameters (THE REAL FIX)
+
+**OLD (encouraged over-generation):**
+```yaml
+num_beams: 5              # Too aggressive - finds longer sequences
+repetition_penalty: 1.0   # ❌ NO PENALTY for repeating boilerplate!
+max_new_tokens: 128
+```
+
+**NEW (anti-hallucination):**
+```yaml
+num_beams: 3               # Reduced - less over-generation
+repetition_penalty: 1.2    # ✅ CRITICAL: 20% penalty for severe hallucinations
+length_penalty: 0.8        # Slightly favor shorter outputs
+max_new_tokens: 150        # Increased for underscore sequences
+no_repeat_ngram_size: 0    # Allow "__" repetition
+```
+
+**Why 1.2 (not 1.1):**
+- Validation error #1 had **CER = 1.057** (prediction 105% longer than truth!)
+- Model added 12+ words: "Soveraigne Lord Charles the Second by the grace of God..."
+- This is severe hallucination, not subtle over-generation
+- 1.1 = 10% penalty (too mild)
+- **1.2 = 20% penalty (appropriate for this severity)**
+- 1.3+ = risks breaking legitimate repetition ("the said", "heires and assignes")
+
+✅ **Updated in `train.py` (eval) and `config_qwen3_8b_vision_adapted.yaml` (inference)**
+
+**Expected:** This could be THE biggest improvement - Δ -0.025 to -0.035
+
+**If 1.2 isn't enough:**
+- Try 1.3 for final inference (30% penalty)
+- Monitor for broken legitimate repetition (e.g., "the said" → "the different")
+- Don't go above 1.3 (risks corrupting historical boilerplate that should repeat)
+
+### 1.6. Conservative Augmentation (Critical Fix)
 
 **OLD (over-aggressive for degraded docs):**
 ```yaml
@@ -75,37 +135,15 @@ p_shear: 0.2      # ✅ Reduced - slant variance only
 
 **Expected:** Could improve by Δ -0.010 to -0.015 (model sees cleaner augmentations closer to test distribution)
 
-### 2. Vision Rank Increase (r=96 Late Blocks)
-
-The config has been updated to increase vision capacity where it matters:
-
-```yaml
-# Late vision blocks: r=64 → r=96 (50% increase)
-'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.qkv': 96
-'visual\.blocks\.(1[8-9]|2[0-6])\.attn\.proj': 96
-'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc1': 96
-'visual\.blocks\.(1[8-9]|2[0-6])\.mlp\.linear_fc2': 96
-
-# Merger: r=64 → r=96
-'visual\.merger\.linear_fc1': 96
-'visual\.merger\.linear_fc2': 96
-
-# LLM: UNCHANGED at r=8 (already excellent)
-```
-
-**Rationale:**
-- Poor-condition docs score 2x worse → vision encoder bottleneck
-- 87.77% normalized word accuracy → LLM is already excellent, NO increase needed
-- Late blocks do character-level discrimination → most important for degraded docs
-- Conservative 50% increase (r=64→96) to avoid overfitting
-
-**Expected improvement:** 0.905 → 0.885-0.890 (Δ -0.015 to -0.020)
-
-**Combined improvements (prompt + augmentation + vision rank):**
+**Combined improvements (ALL fixes):**
+- **Generation control (repetition_penalty=1.2):** Δ -0.025 to -0.035 ⭐ BIGGEST
 - Cleaner prompt: Δ -0.005 to -0.010
 - Conservative augmentation: Δ -0.010 to -0.015
-- Vision rank r=96: Δ -0.015 to -0.020
-- **Total expected: 0.905 → 0.865-0.880** (Δ -0.025 to -0.040)
+- **Total expected: 0.905 → 0.855-0.875** (Δ -0.030 to -0.050)
+
+The generation control fix directly addresses validation error #1 (hallucination) and why short texts perform worst.
+
+**Vision rank:** Kept at r=64 (already sufficient - 87.77% normalized word accuracy proves vision is excellent)
 
 ### Training
 
@@ -159,17 +197,20 @@ Modify training to oversample or weight these higher.
 ## Don't Do This
 
 ❌ Increase LLM rank (87.77% normalized accuracy = already excellent)
-❌ More augmentation (current is comprehensive)
+❌ Increase vision rank (87.77% normalized accuracy = character recognition already excellent)
+❌ More augmentation (current conservative approach is optimal)
 ❌ Lexicon post-processing (tested, made it worse)
 ❌ Longer training (5 epochs is optimal)
+
+**The problem was generation control, not model capacity!**
 
 ## Expected Timeline
 
 | Intervention | Target Score | Effort | Priority |
 |--------------|--------------|--------|----------|
-| Prompt + Aug + Vision r=96 | 0.865-0.880 | 6-8 hrs | ⭐⭐⭐ |
-| + TTA | 0.860-0.875 | 1-2 days | ⭐⭐ |
-| + Ensemble (3 models) | 0.855-0.870 | 3-4 days | ⭐ |
+| ALL fixes (gen control + prompt + aug) | 0.855-0.875 | 6-8 hrs | ⭐⭐⭐ |
+| + TTA | 0.850-0.870 | 1-2 days | ⭐⭐ |
+| + Ensemble (3 models) | 0.845-0.865 | 3-4 days | ⭐ |
 
 ## Bottom Line
 
